@@ -1,9 +1,33 @@
 import { useState, useEffect } from "react";
-const { createClient } = window.supabase;
-const supabase = createClient(
-  "https://ciwgianwiltffwdeigpo.supabase.co",
-  "sb_publishable_De_LCVKbIza3eGBtiILLjQ_hM3LYb9F"
-);
+
+const SUPA_URL = "https://ciwgianwiltffwdeigpo.supabase.co";
+const SUPA_KEY = "sb_publishable_De_LCVKbIza3eGBtiILLjQ_hM3LYb9F";
+
+const h = { "Content-Type": "application/json", "apikey": SUPA_KEY, "Authorization": `Bearer ${SUPA_KEY}` };
+
+async function signUp(email, password) {
+  const r = await fetch(`${SUPA_URL}/auth/v1/signup`, { method:"POST", headers:h, body:JSON.stringify({email,password}) });
+  return r.json();
+}
+async function signIn(email, password) {
+  const r = await fetch(`${SUPA_URL}/auth/v1/token?grant_type=password`, { method:"POST", headers:h, body:JSON.stringify({email,password}) });
+  return r.json();
+}
+async function signOut(token) {
+  await fetch(`${SUPA_URL}/auth/v1/logout`, { method:"POST", headers:{...h, "Authorization":`Bearer ${token}`} });
+}
+async function dbGet(table, token, filter="") {
+  const r = await fetch(`${SUPA_URL}/rest/v1/${table}?order=created_at.desc${filter}`, { headers:{...h,"Authorization":`Bearer ${token}`} });
+  return r.json();
+}
+async function dbInsert(table, token, data) {
+  const r = await fetch(`${SUPA_URL}/rest/v1/${table}`, { method:"POST", headers:{...h,"Authorization":`Bearer ${token}`,"Prefer":"return=representation"}, body:JSON.stringify(data) });
+  return r.json();
+}
+async function dbUpdate(table, token, id, data) {
+  const r = await fetch(`${SUPA_URL}/rest/v1/${table}?id=eq.${id}`, { method:"PATCH", headers:{...h,"Authorization":`Bearer ${token}`,"Prefer":"return=representation"}, body:JSON.stringify(data) });
+  return r.json();
+}
 
 const T = {
   bg:"#1c1f23", surface:"#252a30", panel:"#2e343c", border:"#3a424d",
@@ -43,8 +67,8 @@ export default function App() {
   const [winnerSel, setWinnerSel] = useState("");
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => setSession(session));
-    supabase.auth.onAuthStateChange((_e, session) => setSession(session));
+    const saved = localStorage.getItem("sb_session");
+    if(saved) setSession(JSON.parse(saved));
   }, []);
 
   useEffect(() => { if(session) { fetchBets(); fetchParlays(); } }, [session]);
@@ -52,30 +76,32 @@ export default function App() {
   function toast_(msg, type="ok"){ setToast({msg,type}); setTimeout(()=>setToast(null),3200); }
 
   async function fetchBets() {
-    const { data } = await supabase.from("bets").select("*").order("created_at", { ascending: false });
-    if(data) setBets(data);
+    const data = await dbGet("bets", session.access_token, `&or=(party1_id.eq.${session.user.id},party2_email.eq.${session.user.email})`);
+    if(Array.isArray(data)) setBets(data);
   }
 
   async function fetchParlays() {
-    const { data } = await supabase.from("parlays").select("*").order("created_at", { ascending: false });
-    if(data) setParlays(data);
+    const data = await dbGet("parlays", session.access_token, `&or=(party1_id.eq.${session.user.id},party2_email.eq.${session.user.email})`);
+    if(Array.isArray(data)) setParlays(data);
   }
 
   async function handleAuth() {
     setAuthLoading(true); setAuthError("");
     if(authView === "login") {
-      const { error } = await supabase.auth.signInWithPassword({ email, password });
-      if(error) setAuthError(error.message);
+      const d = await signIn(email, password);
+      if(d.error) { setAuthError(d.error.message || d.error); }
+      else { localStorage.setItem("sb_session", JSON.stringify(d)); setSession(d); }
     } else {
-      const { error } = await supabase.auth.signUp({ email, password });
-      if(error) setAuthError(error.message);
+      const d = await signUp(email, password);
+      if(d.error) setAuthError(d.error.message || d.error);
       else setAuthError("Check your email to confirm your account!");
     }
     setAuthLoading(false);
   }
 
   async function handleLogout() {
-    await supabase.auth.signOut();
+    await signOut(session.access_token);
+    localStorage.removeItem("sb_session");
     setSession(null); setBets([]); setParlays([]);
   }
 
@@ -85,54 +111,45 @@ export default function App() {
     if(f.party2_email.toLowerCase() === session.user.email.toLowerCase()) return toast_("Can't bet against yourself.", "err");
     const bet = {
       id: uid(), party1_id: session.user.id,
-      party2_email: f.party2_email.toLowerCase(),
-      party2_id: null, amount: parseFloat(f.amount),
-      category: f.category, description: f.description,
-      terms: f.terms, status: STATUS.PENDING, winner: null,
-      created_at: now(),
+      party2_email: f.party2_email.toLowerCase(), party2_id: null,
+      amount: parseFloat(f.amount), category: f.category,
+      description: f.description, terms: f.terms,
+      status: STATUS.PENDING, winner: null, created_at: now(),
       history: [{ action:`Bet created by ${session.user.email}`, time:now() }]
     };
-    const { error } = await supabase.from("bets").insert(bet);
-    if(error) return toast_("Error creating bet.", "err");
+    await dbInsert("bets", session.access_token, bet);
     setBetForm(blankBet); setView("list"); fetchBets();
     toast_(`${bet.id} created!`);
   }
 
   async function confirmBet(bet) {
     if(session.user.email.toLowerCase() !== bet.party2_email.toLowerCase())
-      return toast_(`Only ${bet.party2_email} can confirm this bet.`, "err");
-    const updated = {
+      return toast_(`Only ${bet.party2_email} can confirm.`, "err");
+    await dbUpdate("bets", session.access_token, bet.id, {
       status: STATUS.ACTIVE, party2_id: session.user.id,
       history: [...bet.history, { action:`${session.user.email} confirmed — LOCKED 🔒`, time:now() }]
-    };
-    const { error } = await supabase.from("bets").update(updated).eq("id", bet.id);
-    if(error) return toast_("Error confirming bet.", "err");
-    fetchBets(); toast_("Bet locked! 🔒");
-    setView("list");
+    });
+    fetchBets(); setView("list"); toast_("Bet locked! 🔒");
   }
 
   async function settleBet(bet) {
     if(!winnerSel) return toast_("Select a winner.", "err");
-    const loser = winnerSel === "party1" ? bet.party2_email : session.user.email;
     const winnerEmail = winnerSel === "party1" ? session.user.email : bet.party2_email;
-    const updated = {
+    const loserEmail = winnerSel === "party1" ? bet.party2_email : session.user.email;
+    await dbUpdate("bets", session.access_token, bet.id, {
       status: STATUS.SETTLED, winner: winnerEmail,
-      history: [...bet.history, { action:`✅ ${winnerEmail} wins $${bet.amount} from ${loser}`, time:now() }]
-    };
-    const { error } = await supabase.from("bets").update(updated).eq("id", bet.id);
-    if(error) return toast_("Error settling bet.", "err");
+      history: [...bet.history, { action:`✅ ${winnerEmail} wins $${bet.amount} from ${loserEmail}`, time:now() }]
+    });
     fetchBets(); setWinnerSel(""); setView("list");
     toast_(`${winnerEmail} wins! 🏆`);
   }
 
   async function disputeBet(bet) {
-    const updated = {
+    await dbUpdate("bets", session.access_token, bet.id, {
       status: STATUS.DISPUTED,
       history: [...bet.history, { action:"⚠️ DISPUTED.", time:now() }]
-    };
-    await supabase.from("bets").update(updated).eq("id", bet.id);
-    fetchBets(); setView("list");
-    toast_("Flagged as disputed.", "err");
+    });
+    fetchBets(); setView("list"); toast_("Flagged as disputed.", "err");
   }
 
   async function createParlay() {
@@ -145,12 +162,10 @@ export default function App() {
       name: f.name || `${session.user.email} vs ${f.party2_email} Parlay`,
       total_stake: parseFloat(f.totalStake),
       legs: legs.map((l,i) => ({...l, id:i, winner:null, settled:false})),
-      status: STATUS.PENDING, overall_winner: null,
-      created_at: now(),
+      status: STATUS.PENDING, overall_winner: null, created_at: now(),
       history: [{ action:`Parlay created by ${session.user.email} (${legs.length} legs)`, time:now() }]
     };
-    const { error } = await supabase.from("parlays").insert(parlay);
-    if(error) return toast_("Error creating parlay.", "err");
+    await dbInsert("parlays", session.access_token, parlay);
     setParlayForm(blankParlay); setLegs([{...blankLeg}]); setView("list"); setTab("parlays");
     fetchParlays(); toast_(`${parlay.id} created!`);
   }
@@ -158,13 +173,11 @@ export default function App() {
   async function confirmParlay(par) {
     if(session.user.email.toLowerCase() !== par.party2_email.toLowerCase())
       return toast_(`Only ${par.party2_email} can confirm.`, "err");
-    const updated = {
+    await dbUpdate("parlays", session.access_token, par.id, {
       status: STATUS.ACTIVE, party2_id: session.user.id,
       history: [...par.history, { action:`${session.user.email} confirmed — LOCKED 🔒`, time:now() }]
-    };
-    await supabase.from("parlays").update(updated).eq("id", par.id);
-    fetchParlays(); setView("list");
-    toast_("Parlay locked! 🔒");
+    });
+    fetchParlays(); setView("list"); toast_("Parlay locked! 🔒");
   }
 
   async function settleLeg(par, legId, winner) {
@@ -179,15 +192,16 @@ export default function App() {
     }
     const logEntry = { action:`Leg ${legId+1} settled: ${winner==="party1"?session.user.email:par.party2_email} wins`, time:now() };
     const finalLog = allSettled ? [...par.history, logEntry, { action:`🏆 Parlay: ${overallWinner}`, time:now() }] : [...par.history, logEntry];
-    await supabase.from("parlays").update({ legs:updatedLegs, overall_winner:overallWinner, status:newStatus, history:finalLog }).eq("id", par.id);
-    fetchParlays();
-    toast_(allSettled ? `Parlay done! 🏆` : `Leg ${legId+1} settled.`);
+    await dbUpdate("parlays", session.access_token, par.id, { legs:updatedLegs, overall_winner:overallWinner, status:newStatus, history:finalLog });
+    fetchParlays(); toast_(allSettled ? `Parlay done! 🏆` : `Leg ${legId+1} settled.`);
   }
 
   async function disputeParlay(par) {
-    await supabase.from("parlays").update({ status:STATUS.DISPUTED, history:[...par.history,{action:"⚠️ DISPUTED.",time:now()}] }).eq("id", par.id);
-    fetchParlays(); setView("list");
-    toast_("Parlay disputed.", "err");
+    await dbUpdate("parlays", session.access_token, par.id, {
+      status: STATUS.DISPUTED,
+      history: [...par.history, { action:"⚠️ DISPUTED.", time:now() }]
+    });
+    fetchParlays(); setView("list"); toast_("Parlay disputed.", "err");
   }
 
   const myEmail = session?.user?.email?.toLowerCase();
@@ -198,25 +212,21 @@ export default function App() {
   const filteredBets = filter==="all" ? bets : bets.filter(b=>b.status===filter);
   const filteredParlays = filter==="all" ? parlays : parlays.filter(p=>p.status===filter);
 
-  // AUTH SCREEN
   if(!session) return (
     <div style={{...S.root, display:"flex", alignItems:"center", justifyContent:"center"}}>
       <style>{css}</style>
       <div style={S.authCard}>
-        <div style={S.logoIcon}>⚖</div>
-        <div style={S.logoTitle}>ESCROW BET</div>
-        <div style={S.logoSub}>Side Bet Tracker</div>
+        <div style={{fontSize:40, textAlign:"center", color:T.orange}}>⚖</div>
+        <div style={{fontSize:24, fontWeight:"bold", letterSpacing:3, color:T.orange, textAlign:"center"}}>ESCROW BET</div>
+        <div style={{fontSize:11, color:T.textDim, letterSpacing:2, textTransform:"uppercase", textAlign:"center", marginBottom:8}}>Side Bet Tracker</div>
         <div style={S.authTabs}>
           <button style={{...S.authTab,...(authView==="login"?S.authTabOn:{})}} onClick={()=>setAuthView("login")}>Login</button>
           <button style={{...S.authTab,...(authView==="signup"?S.authTabOn:{})}} onClick={()=>setAuthView("signup")}>Sign Up</button>
         </div>
         <input style={S.input} type="email" placeholder="Email address" value={email} onChange={e=>setEmail(e.target.value)} />
-        <input style={S.input} type="password" placeholder="Password" value={password} onChange={e=>setPassword(e.target.value)}
-          onKeyDown={e=>e.key==="Enter"&&handleAuth()} />
+        <input style={S.input} type="password" placeholder="Password" value={password} onChange={e=>setPassword(e.target.value)} onKeyDown={e=>e.key==="Enter"&&handleAuth()} />
         {authError && <div style={{fontSize:13, color: authError.includes("Check") ? T.green : T.red}}>{authError}</div>}
-        <button style={S.subBtn} onClick={handleAuth} disabled={authLoading}>
-          {authLoading ? "..." : authView==="login" ? "Login →" : "Create Account →"}
-        </button>
+        <button style={S.subBtn} onClick={handleAuth} disabled={authLoading}>{authLoading?"...":authView==="login"?"Login →":"Create Account →"}</button>
       </div>
     </div>
   );
@@ -226,7 +236,10 @@ export default function App() {
       <style>{css}</style>
       {toast && <div style={{...S.toast, background:toast.type==="err"?T.red:"#1c3d28"}}>{toast.msg}</div>}
       <header style={S.header}>
-        <div style={S.logo}><span style={S.logoIcon2}>⚖</span><div><div style={S.logoTitle2}>ESCROW BET</div><div style={S.logoSub2}>Side Bet Tracker</div></div></div>
+        <div style={S.logo}>
+          <span style={{fontSize:28, color:T.orange}}>⚖</span>
+          <div><div style={{fontSize:20, fontWeight:"bold", letterSpacing:3, color:T.orange}}>ESCROW BET</div><div style={{fontSize:10, color:T.textDim, letterSpacing:2, textTransform:"uppercase"}}>Side Bet Tracker</div></div>
+        </div>
         <div style={{display:"flex", alignItems:"center", gap:16, flexWrap:"wrap"}}>
           <div style={S.stats}>
             {[{l:"Active",v:bets.filter(b=>b.status===STATUS.ACTIVE).length+parlays.filter(p=>p.status===STATUS.ACTIVE).length},{l:"In Play",v:`$${activeStake.toFixed(2)}`},{l:"Settled",v:bets.filter(b=>b.status===STATUS.SETTLED).length+parlays.filter(p=>p.status===STATUS.SETTLED).length}].map(s=>(
@@ -254,8 +267,8 @@ export default function App() {
             </div>
             <button style={S.newBtn} onClick={()=>setView(tab==="bets"?"createBet":"createParlay")}>+ New {tab==="bets"?"Bet":"Parlay"}</button>
           </div>
-          {tab==="bets" && (filteredBets.length===0 ? <Empty label="No bets yet." /> : <div style={S.list}>{filteredBets.map(b=><BetCard key={b.id} bet={b} myEmail={myEmail} onClick={()=>{setSelected(b);setView("detailBet");}} />)}</div>)}
-          {tab==="parlays" && (filteredParlays.length===0 ? <Empty label="No parlays yet." /> : <div style={S.list}>{filteredParlays.map(p=><ParlayCard key={p.id} par={p} myEmail={myEmail} onClick={()=>{setSelected(p);setView("detailParlay");}} />)}</div>)}
+          {tab==="bets" && (filteredBets.length===0?<Empty label="No bets yet." />:<div style={S.list}>{filteredBets.map(b=><BetCard key={b.id} bet={b} onClick={()=>{setSelected(b);setView("detailBet");}} />)}</div>)}
+          {tab==="parlays" && (filteredParlays.length===0?<Empty label="No parlays yet." />:<div style={S.list}>{filteredParlays.map(p=><ParlayCard key={p.id} par={p} onClick={()=>{setSelected(p);setView("detailParlay");}} />)}</div>)}
         </div>
       )}
 
@@ -291,7 +304,7 @@ export default function App() {
               <div key={i} style={S.legCard}>
                 <div style={{display:"flex",justifyContent:"space-between",marginBottom:10}}>
                   <span style={{fontSize:12,color:T.orange,fontWeight:"bold"}}>Leg {i+1}</span>
-                  {legs.length>2 && <button style={{background:"none",border:"none",color:T.textDim,cursor:"pointer"}} onClick={()=>setLegs(p=>p.filter((_,idx)=>idx!==i))}>✕</button>}
+                  {legs.length>2&&<button style={{background:"none",border:"none",color:T.textDim,cursor:"pointer"}} onClick={()=>setLegs(p=>p.filter((_,idx)=>idx!==i))}>✕</button>}
                 </div>
                 <div style={S.g2}>
                   <F label="Category"><select style={S.input} value={leg.category} onChange={e=>setLegs(p=>p.map((l,idx)=>idx===i?{...l,category:e.target.value}:l))}>{CATEGORIES.map(c=><option key={c}>{c}</option>)}</select></F>
@@ -307,25 +320,25 @@ export default function App() {
 
       {view==="detailBet" && selected && (()=>{
         const bet = bets.find(b=>b.id===selected.id)||selected;
-        const isParty1 = myEmail===session.user.email.toLowerCase() && bet.party1_id===session.user.id;
-        const isParty2 = myEmail===bet.party2_email.toLowerCase();
+        const isParty1 = bet.party1_id===session.user.id;
+        const isParty2 = myEmail===bet.party2_email?.toLowerCase();
         return (
           <div style={S.page}><Back onClick={()=>setView("list")} />
             <div style={S.card}>
               <DHeader id={bet.id} cat={bet.category} status={bet.status} />
               <Pot amount={`$${bet.amount}`} label="Pot" sub="Winner takes all" />
               <div style={S.parties}>
-                <div style={{...S.pBox,...(bet.winner&&bet.winner===session.user.email?S.pWin:{})}}><div style={S.pName}>{bet.party1_id===session.user.id?"You":bet.party2_email}</div><div style={S.pRole}>Creator</div>{bet.winner===session.user.email&&<div style={S.wBdg}>🏆 Winner</div>}</div>
+                <div style={{...S.pBox,...(bet.winner===myEmail?S.pWin:{})}}><div style={S.pName}>{isParty1?"You":bet.party2_email}</div><div style={S.pRole}>Creator</div>{bet.winner===myEmail&&isParty1&&<div style={S.wBdg}>🏆 Winner</div>}</div>
                 <div style={S.vsCirc}>VS</div>
-                <div style={{...S.pBox,...(bet.winner&&bet.winner===bet.party2_email?S.pWin:{})}}><div style={S.pName}>{bet.party2_email}</div><div style={S.pRole}>{bet.party2_id?"✅ Confirmed":"⏳ Pending"}</div>{bet.winner===bet.party2_email&&<div style={S.wBdg}>🏆 Winner</div>}</div>
+                <div style={{...S.pBox,...(bet.winner===bet.party2_email?S.pWin:{})}}><div style={S.pName}>{bet.party2_email}</div><div style={S.pRole}>{bet.party2_id?"✅ Confirmed":"⏳ Pending"}</div>{bet.winner===bet.party2_email&&<div style={S.wBdg}>🏆 Winner</div>}</div>
               </div>
-              <Sec title="Details"><Row k="Description" v={bet.description} />{bet.terms&&<Row k="Terms" v={bet.terms} />}<Row k="Created" v={fmt(bet.created_at)} /></Sec>
-              {bet.status===STATUS.PENDING && isParty2 && <ABox color={T.orange}><div style={S.aTitle}>⏳ Confirm this bet</div><div style={S.aSub}>You've been challenged! Lock it in to accept.</div><button style={S.okBtn} onClick={()=>confirmBet(bet)}>Confirm & Lock 🔒</button></ABox>}
-              {bet.status===STATUS.PENDING && isParty1 && <ABox color={T.orange}><div style={S.aTitle}>⏳ Waiting for {bet.party2_email}</div><div style={S.aSub}>Ask them to log in and confirm the bet.</div></ABox>}
-              {bet.status===STATUS.ACTIVE && (isParty1||isParty2) && <ABox color={T.green}><div style={S.aTitle}>🏆 Settle the Bet</div><select style={S.input} value={winnerSel} onChange={e=>setWinnerSel(e.target.value)}><option value="">— Select Winner —</option><option value="party1">{bet.party1_id===session.user.id?"You (Creator)":bet.party2_email}</option><option value="party2">{bet.party2_email}</option></select><div style={{display:"flex",gap:10}}><button style={S.okBtn} onClick={()=>settleBet(bet)}>Settle ✅</button><button style={S.badBtn} onClick={()=>disputeBet(bet)}>Dispute ⚠️</button></div></ABox>}
-              {bet.status===STATUS.SETTLED && <ABox color={T.blue}><div style={S.aTitle}>✅ Settled</div><div style={S.aSub}>{bet.winner} wins ${bet.amount}!</div></ABox>}
-              {bet.status===STATUS.DISPUTED && <ABox color={T.red}><div style={S.aTitle}>⚠️ Disputed</div><div style={S.aSub}>Resolve manually.</div></ABox>}
-              <Log history={bet.history} />
+              <Sec title="Details"><Row k="Description" v={bet.description}/>{bet.terms&&<Row k="Terms" v={bet.terms}/>}<Row k="Created" v={fmt(bet.created_at)}/></Sec>
+              {bet.status===STATUS.PENDING&&isParty2&&<ABox color={T.orange}><div style={S.aTitle}>⏳ Confirm this bet</div><div style={S.aSub}>You've been challenged! Lock it in to accept.</div><button style={S.okBtn} onClick={()=>confirmBet(bet)}>Confirm & Lock 🔒</button></ABox>}
+              {bet.status===STATUS.PENDING&&isParty1&&<ABox color={T.orange}><div style={S.aTitle}>⏳ Waiting for {bet.party2_email}</div><div style={S.aSub}>Ask them to log in and confirm.</div></ABox>}
+              {bet.status===STATUS.ACTIVE&&(isParty1||isParty2)&&<ABox color={T.green}><div style={S.aTitle}>🏆 Settle the Bet</div><select style={S.input} value={winnerSel} onChange={e=>setWinnerSel(e.target.value)}><option value="">— Select Winner —</option><option value="party1">{isParty1?"You":bet.party2_email}</option><option value="party2">{bet.party2_email}</option></select><div style={{display:"flex",gap:10}}><button style={S.okBtn} onClick={()=>settleBet(bet)}>Settle ✅</button><button style={S.badBtn} onClick={()=>disputeBet(bet)}>Dispute ⚠️</button></div></ABox>}
+              {bet.status===STATUS.SETTLED&&<ABox color={T.blue}><div style={S.aTitle}>✅ Settled</div><div style={S.aSub}>{bet.winner} wins ${bet.amount}!</div></ABox>}
+              {bet.status===STATUS.DISPUTED&&<ABox color={T.red}><div style={S.aTitle}>⚠️ Disputed</div><div style={S.aSub}>Resolve manually.</div></ABox>}
+              <Log history={bet.history}/>
             </div>
           </div>
         );
@@ -333,19 +346,19 @@ export default function App() {
 
       {view==="detailParlay" && selected && (()=>{
         const par = parlays.find(p=>p.id===selected.id)||selected;
-        const isParty2 = myEmail===par.party2_email.toLowerCase();
         const isParty1 = par.party1_id===session.user.id;
+        const isParty2 = myEmail===par.party2_email?.toLowerCase();
         const sc = par.legs.filter(l=>l.settled).length;
         return (
           <div style={S.page}><Back onClick={()=>setView("list")} />
             <div style={S.card}>
-              <DHeader id={par.id} cat={`🔗 ${par.legs.length}-Leg Parlay`} status={par.status} />
+              <DHeader id={par.id} cat={`🔗 ${par.legs.length}-Leg Parlay`} status={par.status}/>
               <div style={{fontSize:14,color:T.textDim,marginBottom:16,fontStyle:"italic"}}>{par.name}</div>
-              <Pot amount={`$${par.total_stake}`} label="Parlay Pot" sub={`${sc}/${par.legs.length} legs settled`} />
+              <Pot amount={`$${par.total_stake}`} label="Parlay Pot" sub={`${sc}/${par.legs.length} legs settled`}/>
               <div style={S.parties}>
-                <div style={{...S.pBox,...(par.overall_winner&&par.overall_winner===session.user.email?S.pWin:{})}}><div style={S.pName}>{isParty1?"You":par.party2_email}</div><div style={S.pRole}>Creator</div></div>
+                <div style={{...S.pBox,...(par.overall_winner===myEmail?S.pWin:{})}}><div style={S.pName}>{isParty1?"You":par.party2_email}</div><div style={S.pRole}>Creator</div></div>
                 <div style={S.vsCirc}>VS</div>
-                <div style={{...S.pBox,...(par.overall_winner&&par.overall_winner===par.party2_email?S.pWin:{})}}><div style={S.pName}>{par.party2_email}</div><div style={S.pRole}>{par.party2_id?"✅ Confirmed":"⏳ Pending"}</div></div>
+                <div style={{...S.pBox,...(par.overall_winner===par.party2_email?S.pWin:{})}}><div style={S.pName}>{par.party2_email}</div><div style={S.pRole}>{par.party2_id?"✅ Confirmed":"⏳ Pending"}</div></div>
               </div>
               <Sec title={`Legs (${par.legs.length})`}>
                 {par.legs.map((leg,i)=>(
@@ -355,16 +368,16 @@ export default function App() {
                       {leg.settled?<span style={{...S.badge,background:T.green}}>✅ {leg.winner==="party1"?(isParty1?"You":session.user.email):par.party2_email}</span>:<span style={{...S.badge,background:T.textMuted}}>Pending</span>}
                     </div>
                     <div style={{fontSize:13,color:T.textDim,fontStyle:"italic"}}>{leg.description}</div>
-                    {par.status===STATUS.ACTIVE && !leg.settled && (isParty1||isParty2) && <LegSettler leg={leg} par={par} onSettle={(id,w)=>settleLeg(par,id,w)} />}
+                    {par.status===STATUS.ACTIVE&&!leg.settled&&(isParty1||isParty2)&&<LegSettler leg={leg} par={par} onSettle={(id,w)=>settleLeg(par,id,w)}/>}
                   </div>
                 ))}
               </Sec>
-              {par.status===STATUS.PENDING && isParty2 && <ABox color={T.orange}><div style={S.aTitle}>⏳ Confirm this parlay</div><button style={S.okBtn} onClick={()=>confirmParlay(par)}>Confirm Parlay 🔒</button></ABox>}
-              {par.status===STATUS.PENDING && isParty1 && <ABox color={T.orange}><div style={S.aTitle}>⏳ Waiting for {par.party2_email}</div><div style={S.aSub}>Ask them to log in and confirm.</div></ABox>}
-              {par.status===STATUS.ACTIVE && sc<par.legs.length && (isParty1||isParty2) && <div style={{textAlign:"right",marginTop:12}}><button style={S.badBtn} onClick={()=>disputeParlay(par)}>Flag Dispute ⚠️</button></div>}
-              {par.status===STATUS.SETTLED && <ABox color={T.blue}><div style={S.aTitle}>✅ Parlay Settled</div><div style={S.aSub}>{par.overall_winner?.includes("SPLIT")?"Split — no winner.":`${par.overall_winner} wins $${par.total_stake}`}</div></ABox>}
-              {par.status===STATUS.DISPUTED && <ABox color={T.red}><div style={S.aTitle}>⚠️ Disputed</div><div style={S.aSub}>Resolve manually.</div></ABox>}
-              <Log history={par.history} />
+              {par.status===STATUS.PENDING&&isParty2&&<ABox color={T.orange}><div style={S.aTitle}>⏳ Confirm this parlay</div><button style={S.okBtn} onClick={()=>confirmParlay(par)}>Confirm Parlay 🔒</button></ABox>}
+              {par.status===STATUS.PENDING&&isParty1&&<ABox color={T.orange}><div style={S.aTitle}>⏳ Waiting for {par.party2_email}</div><div style={S.aSub}>Ask them to log in and confirm.</div></ABox>}
+              {par.status===STATUS.ACTIVE&&sc<par.legs.length&&(isParty1||isParty2)&&<div style={{textAlign:"right",marginTop:12}}><button style={S.badBtn} onClick={()=>disputeParlay(par)}>Flag Dispute ⚠️</button></div>}
+              {par.status===STATUS.SETTLED&&<ABox color={T.blue}><div style={S.aTitle}>✅ Parlay Settled</div><div style={S.aSub}>{par.overall_winner?.includes("SPLIT")?"Split — no winner.":`${par.overall_winner} wins $${par.total_stake}`}</div></ABox>}
+              {par.status===STATUS.DISPUTED&&<ABox color={T.red}><div style={S.aTitle}>⚠️ Disputed</div><div style={S.aSub}>Resolve manually.</div></ABox>}
+              <Log history={par.history}/>
             </div>
           </div>
         );
@@ -385,7 +398,7 @@ function LegSettler({leg,par,onSettle}){
   );
 }
 
-function BetCard({bet,myEmail,onClick}){
+function BetCard({bet,onClick}){
   return(
     <div style={S.betCard} className="hov" onClick={onClick}>
       <div style={S.cTop}><span style={S.idTag}>{bet.id}</span><Bdg status={bet.status}/></div>
@@ -395,7 +408,7 @@ function BetCard({bet,myEmail,onClick}){
   );
 }
 
-function ParlayCard({par,myEmail,onClick}){
+function ParlayCard({par,onClick}){
   const sc=par.legs.filter(l=>l.settled).length;
   return(
     <div style={S.betCard} className="hov" onClick={onClick}>
@@ -421,17 +434,11 @@ const S={
   root:{minHeight:"100vh",background:"#1c1f23",color:"#d4dbe3",fontFamily:"'Trebuchet MS',sans-serif",position:"relative"},
   toast:{position:"fixed",top:16,right:16,padding:"12px 20px",borderRadius:8,color:"#fff",fontSize:13,zIndex:9999,maxWidth:320,boxShadow:"0 4px 24px rgba(0,0,0,0.5)"},
   authCard:{background:"#252a30",border:"1px solid #3a424d",borderRadius:16,padding:32,width:"100%",maxWidth:380,display:"flex",flexDirection:"column",gap:14},
-  logoIcon:{fontSize:40,textAlign:"center",color:"#e8751a"},
-  logoTitle:{fontSize:24,fontWeight:"bold",letterSpacing:3,color:"#e8751a",textAlign:"center"},
-  logoSub:{fontSize:11,color:"#6b7a8a",letterSpacing:2,textTransform:"uppercase",textAlign:"center",marginBottom:8},
   authTabs:{display:"flex",borderBottom:"1px solid #3a424d",marginBottom:4},
   authTab:{flex:1,padding:"10px",background:"none",border:"none",color:"#6b7a8a",fontSize:14,cursor:"pointer",borderBottom:"2px solid transparent"},
   authTabOn:{color:"#e8751a",borderBottom:"2px solid #e8751a"},
   header:{background:"#252a30",borderBottom:"2px solid #e8751a",padding:"14px 22px",display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:12},
   logo:{display:"flex",alignItems:"center",gap:12},
-  logoIcon2:{fontSize:28,color:"#e8751a"},
-  logoTitle2:{fontSize:20,fontWeight:"bold",letterSpacing:3,color:"#e8751a"},
-  logoSub2:{fontSize:10,color:"#6b7a8a",letterSpacing:2,textTransform:"uppercase"},
   logoutBtn:{padding:"5px 14px",background:"none",border:"1px solid #3a424d",borderRadius:6,color:"#6b7a8a",fontSize:12,cursor:"pointer"},
   stats:{display:"flex",gap:24,flexWrap:"wrap"},
   stat:{display:"flex",flexDirection:"column",alignItems:"center"},
