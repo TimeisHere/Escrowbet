@@ -33,16 +33,22 @@ const T = {
   bg:"#1c1f23", surface:"#252a30", panel:"#2e343c", border:"#3a424d",
   orange:"#e8751a", orangeDim:"#7a3c0d", text:"#d4dbe3",
   textDim:"#6b7a8a", textMuted:"#404d5c", green:"#2e7d52", red:"#8b2525", blue:"#1e5a8a",
+  purple:"#5b2d8a",
 };
 
 const CATEGORIES = ["⛳ Golf","🎮 Video Game","🏀 Sports","🎯 Darts","🎱 Pool","🃏 Cards","🏌️ Other"];
-const STATUS = { PENDING:"pending", ACTIVE:"active", SETTLED:"settled", DISPUTED:"disputed" };
-const STATUS_COLORS = { pending:"#b87a10", active:"#2e7d52", settled:"#1e5a8a", disputed:"#8b2525" };
-const STATUS_LABELS = { pending:"Awaiting Confirm", active:"Locked In", settled:"Settled", disputed:"Disputed" };
+const STATUS = { PENDING:"pending", ACTIVE:"active", AWAITING_REF:"awaiting_ref", SETTLED:"settled", DISPUTED:"disputed" };
+const STATUS_COLORS = { pending:"#b87a10", active:"#2e7d52", awaiting_ref:"#5b2d8a", settled:"#1e5a8a", disputed:"#8b2525" };
+const STATUS_LABELS = { pending:"Awaiting Confirm", active:"Locked In", awaiting_ref:"Ref Review", settled:"Settled", disputed:"Disputed" };
 
 function uid(p="BET"){ return `${p}-${Math.random().toString(36).substr(2,6).toUpperCase()}`; }
 function fmt(iso){ return new Date(iso).toLocaleString(); }
 function now(){ return new Date().toISOString(); }
+
+function openVenmo(toUser, amount, note) {
+  const encoded = encodeURIComponent(note);
+  window.open(`https://venmo.com/${toUser}?txn=pay&amount=${amount}&note=${encoded}`, "_blank");
+}
 
 export default function App() {
   const [session, setSession] = useState(null);
@@ -58,9 +64,9 @@ export default function App() {
   const [selected, setSelected] = useState(null);
   const [filter, setFilter] = useState("all");
   const [toast, setToast] = useState(null);
-  const blankBet = { party2_email:"", amount:"", category:CATEGORIES[0], description:"", terms:"" };
+  const blankBet = { party2_email:"", amount:"", category:CATEGORIES[0], description:"", terms:"", referee_email:"", party1_venmo:"", party2_venmo:"" };
   const [betForm, setBetForm] = useState(blankBet);
-  const blankParlay = { name:"", party2_email:"", totalStake:"" };
+  const blankParlay = { name:"", party2_email:"", totalStake:"", referee_email:"", party1_venmo:"", party2_venmo:"" };
   const [parlayForm, setParlayForm] = useState(blankParlay);
   const blankLeg = { description:"", category:CATEGORIES[0] };
   const [legs, setLegs] = useState([{...blankLeg}]);
@@ -76,12 +82,12 @@ export default function App() {
   function toast_(msg, type="ok"){ setToast({msg,type}); setTimeout(()=>setToast(null),3200); }
 
   async function fetchBets() {
-    const data = await dbGet("bets", session.access_token, `&or=(party1_id.eq.${session.user.id},party2_email.eq.${session.user.email})`);
+    const data = await dbGet("bets", session.access_token, `&or=(party1_id.eq.${session.user.id},party2_email.eq.${session.user.email},referee_email.eq.${session.user.email})`);
     if(Array.isArray(data)) setBets(data);
   }
 
   async function fetchParlays() {
-    const data = await dbGet("parlays", session.access_token, `&or=(party1_id.eq.${session.user.id},party2_email.eq.${session.user.email})`);
+    const data = await dbGet("parlays", session.access_token, `&or=(party1_id.eq.${session.user.id},party2_email.eq.${session.user.email},referee_email.eq.${session.user.email})`);
     if(Array.isArray(data)) setParlays(data);
   }
 
@@ -111,10 +117,14 @@ export default function App() {
     if(f.party2_email.toLowerCase() === session.user.email.toLowerCase()) return toast_("Can't bet against yourself.", "err");
     const bet = {
       id: uid(), party1_id: session.user.id,
-      party2_email: f.party2_email.toLowerCase(), party2_id: null,
-      amount: parseFloat(f.amount), category: f.category,
-      description: f.description, terms: f.terms,
-      status: STATUS.PENDING, winner: null, created_at: now(),
+      party2_email: f.party2_email.toLowerCase(),
+      referee_email: f.referee_email.toLowerCase() || null,
+      party1_venmo: f.party1_venmo || null,
+      party2_venmo: f.party2_venmo || null,
+      party2_id: null, amount: parseFloat(f.amount),
+      category: f.category, description: f.description,
+      terms: f.terms, status: STATUS.PENDING, winner: null,
+      created_at: now(),
       history: [{ action:`Bet created by ${session.user.email}`, time:now() }]
     };
     await dbInsert("bets", session.access_token, bet);
@@ -132,16 +142,48 @@ export default function App() {
     fetchBets(); setView("list"); toast_("Bet locked! 🔒");
   }
 
-  async function settleBet(bet) {
+  async function submitOutcome(bet) {
     if(!winnerSel) return toast_("Select a winner.", "err");
     const winnerEmail = winnerSel === "party1" ? session.user.email : bet.party2_email;
     const loserEmail = winnerSel === "party1" ? bet.party2_email : session.user.email;
-    await dbUpdate("bets", session.access_token, bet.id, {
-      status: STATUS.SETTLED, winner: winnerEmail,
-      history: [...bet.history, { action:`✅ ${winnerEmail} wins $${bet.amount} from ${loserEmail}`, time:now() }]
-    });
+    if(bet.referee_email) {
+      await dbUpdate("bets", session.access_token, bet.id, {
+        status: STATUS.AWAITING_REF, winner: winnerEmail,
+        history: [...bet.history, { action:`Outcome submitted: ${winnerEmail} wins — awaiting referee confirmation`, time:now() }]
+      });
+      toast_("Outcome submitted! Waiting for referee to confirm.");
+    } else {
+      await dbUpdate("bets", session.access_token, bet.id, {
+        status: STATUS.SETTLED, winner: winnerEmail,
+        history: [...bet.history, { action:`✅ ${winnerEmail} wins $${bet.amount} from ${loserEmail}`, time:now() }]
+      });
+      toast_(`${winnerEmail} wins! 🏆`);
+    }
     fetchBets(); setWinnerSel(""); setView("list");
-    toast_(`${winnerEmail} wins! 🏆`);
+  }
+
+  async function refereeConfirm(bet) {
+    if(session.user.email.toLowerCase() !== bet.referee_email?.toLowerCase())
+      return toast_("Only the referee can confirm.", "err");
+    const loserEmail = bet.winner === session.user.email ? bet.party2_email : bet.party2_email;
+    await dbUpdate("bets", session.access_token, bet.id, {
+      status: STATUS.SETTLED,
+      history: [...bet.history, { action:`⚖️ Referee ${session.user.email} confirmed: ${bet.winner} wins $${bet.amount}`, time:now() }]
+    });
+    fetchBets(); setView("list");
+    toast_("Referee confirmed! Bet settled. 🏆");
+  }
+
+  async function refereeOverride(bet) {
+    if(session.user.email.toLowerCase() !== bet.referee_email?.toLowerCase())
+      return toast_("Only the referee can override.", "err");
+    const newWinner = bet.winner === bet.party2_email ? session.user.email : bet.party2_email;
+    await dbUpdate("bets", session.access_token, bet.id, {
+      status: STATUS.SETTLED, winner: newWinner,
+      history: [...bet.history, { action:`⚖️ Referee OVERRODE outcome: ${newWinner} wins $${bet.amount}`, time:now() }]
+    });
+    fetchBets(); setView("list");
+    toast_("Referee overrode outcome!", "err");
   }
 
   async function disputeBet(bet) {
@@ -158,7 +200,11 @@ export default function App() {
     if(legs.some(l => !l.description)) return toast_("All legs need a description.", "err");
     const parlay = {
       id: uid("PAR"), party1_id: session.user.id,
-      party2_email: f.party2_email.toLowerCase(), party2_id: null,
+      party2_email: f.party2_email.toLowerCase(),
+      referee_email: f.referee_email.toLowerCase() || null,
+      party1_venmo: f.party1_venmo || null,
+      party2_venmo: f.party2_venmo || null,
+      party2_id: null,
       name: f.name || `${session.user.email} vs ${f.party2_email} Parlay`,
       total_stake: parseFloat(f.totalStake),
       legs: legs.map((l,i) => ({...l, id:i, winner:null, settled:false})),
@@ -188,12 +234,24 @@ export default function App() {
       const p1Wins = updatedLegs.every(l => l.winner==="party1");
       const p2Wins = updatedLegs.every(l => l.winner==="party2");
       overallWinner = p1Wins ? session.user.email : p2Wins ? par.party2_email : "SPLIT — No winner";
-      newStatus = STATUS.SETTLED;
+      newStatus = par.referee_email ? STATUS.AWAITING_REF : STATUS.SETTLED;
     }
     const logEntry = { action:`Leg ${legId+1} settled: ${winner==="party1"?session.user.email:par.party2_email} wins`, time:now() };
-    const finalLog = allSettled ? [...par.history, logEntry, { action:`🏆 Parlay: ${overallWinner}`, time:now() }] : [...par.history, logEntry];
+    const finalLog = allSettled
+      ? [...par.history, logEntry, { action: par.referee_email ? `All legs done — awaiting referee` : `🏆 Parlay: ${overallWinner}`, time:now() }]
+      : [...par.history, logEntry];
     await dbUpdate("parlays", session.access_token, par.id, { legs:updatedLegs, overall_winner:overallWinner, status:newStatus, history:finalLog });
-    fetchParlays(); toast_(allSettled ? `Parlay done! 🏆` : `Leg ${legId+1} settled.`);
+    fetchParlays(); toast_(allSettled ? `All legs done! 🏆` : `Leg ${legId+1} settled.`);
+  }
+
+  async function refereeConfirmParlay(par) {
+    if(session.user.email.toLowerCase() !== par.referee_email?.toLowerCase())
+      return toast_("Only the referee can confirm.", "err");
+    await dbUpdate("parlays", session.access_token, par.id, {
+      status: STATUS.SETTLED,
+      history: [...par.history, { action:`⚖️ Referee confirmed: ${par.overall_winner} wins $${par.total_stake}`, time:now() }]
+    });
+    fetchParlays(); setView("list"); toast_("Referee confirmed parlay! 🏆");
   }
 
   async function disputeParlay(par) {
@@ -206,8 +264,8 @@ export default function App() {
 
   const myEmail = session?.user?.email?.toLowerCase();
   const activeStake = [
-    ...bets.filter(b=>b.status===STATUS.ACTIVE).map(b=>b.amount),
-    ...parlays.filter(p=>p.status===STATUS.ACTIVE).map(p=>p.total_stake)
+    ...bets.filter(b=>b.status===STATUS.ACTIVE||b.status===STATUS.AWAITING_REF).map(b=>b.amount),
+    ...parlays.filter(p=>p.status===STATUS.ACTIVE||p.status===STATUS.AWAITING_REF).map(p=>p.total_stake)
   ].reduce((s,v)=>s+v,0);
   const filteredBets = filter==="all" ? bets : bets.filter(b=>b.status===filter);
   const filteredParlays = filter==="all" ? parlays : parlays.filter(p=>p.status===filter);
@@ -216,8 +274,8 @@ export default function App() {
     <div style={{...S.root, display:"flex", alignItems:"center", justifyContent:"center"}}>
       <style>{css}</style>
       <div style={S.authCard}>
-        <div style={{fontSize:40, textAlign:"center", color:T.orange}}>⚖</div>
-        <div style={{fontSize:24, fontWeight:"bold", letterSpacing:3, color:T.orange, textAlign:"center"}}>SnoVale</div>
+        <div style={{fontSize:48, textAlign:"center"}}>🏔</div>
+        <div style={{fontSize:28, fontWeight:"bold", letterSpacing:3, color:T.orange, textAlign:"center"}}>SnoVale</div>
         <div style={{fontSize:11, color:T.textDim, letterSpacing:2, textTransform:"uppercase", textAlign:"center", marginBottom:8}}>Side Bet Tracker</div>
         <div style={S.authTabs}>
           <button style={{...S.authTab,...(authView==="login"?S.authTabOn:{})}} onClick={()=>setAuthView("login")}>Login</button>
@@ -237,12 +295,12 @@ export default function App() {
       {toast && <div style={{...S.toast, background:toast.type==="err"?T.red:"#1c3d28"}}>{toast.msg}</div>}
       <header style={S.header}>
         <div style={S.logo}>
-          <span style={{fontSize:28, color:T.orange}}>⚖</span>
+          <span style={{fontSize:24}}>🏔</span>
           <div><div style={{fontSize:20, fontWeight:"bold", letterSpacing:3, color:T.orange}}>SnoVale</div><div style={{fontSize:10, color:T.textDim, letterSpacing:2, textTransform:"uppercase"}}>Side Bet Tracker</div></div>
         </div>
         <div style={{display:"flex", alignItems:"center", gap:16, flexWrap:"wrap"}}>
           <div style={S.stats}>
-            {[{l:"Active",v:bets.filter(b=>b.status===STATUS.ACTIVE).length+parlays.filter(p=>p.status===STATUS.ACTIVE).length},{l:"In Play",v:`$${activeStake.toFixed(2)}`},{l:"Settled",v:bets.filter(b=>b.status===STATUS.SETTLED).length+parlays.filter(p=>p.status===STATUS.SETTLED).length}].map(s=>(
+            {[{l:"Active",v:bets.filter(b=>b.status===STATUS.ACTIVE||b.status===STATUS.AWAITING_REF).length+parlays.filter(p=>p.status===STATUS.ACTIVE||p.status===STATUS.AWAITING_REF).length},{l:"In Play",v:`$${activeStake.toFixed(2)}`},{l:"Settled",v:bets.filter(b=>b.status===STATUS.SETTLED).length+parlays.filter(p=>p.status===STATUS.SETTLED).length}].map(s=>(
               <div key={s.l} style={S.stat}><span style={S.statN}>{s.v}</span><span style={S.statL}>{s.l}</span></div>
             ))}
           </div>
@@ -261,7 +319,7 @@ export default function App() {
           </div>
           <div style={S.toolbar}>
             <div style={S.filters}>
-              {["all",STATUS.PENDING,STATUS.ACTIVE,STATUS.SETTLED,STATUS.DISPUTED].map(f=>(
+              {["all",STATUS.PENDING,STATUS.ACTIVE,STATUS.AWAITING_REF,STATUS.SETTLED,STATUS.DISPUTED].map(f=>(
                 <button key={f} onClick={()=>setFilter(f)} style={{...S.fBtn,...(filter===f?S.fBtnOn:{})}}>{f==="all"?"All":STATUS_LABELS[f]}</button>
               ))}
             </div>
@@ -283,7 +341,17 @@ export default function App() {
               <F label="What's the Bet? *" full><input style={S.input} placeholder="e.g. Back 9 lowest score wins" value={betForm.description} onChange={e=>setBetForm({...betForm,description:e.target.value})} /></F>
               <F label="Terms" full><textarea style={{...S.input,height:72,resize:"vertical"}} placeholder="Handicaps, rules..." value={betForm.terms} onChange={e=>setBetForm({...betForm,terms:e.target.value})} /></F>
             </div>
-            <div style={S.note}>⚠️ Your opponent must log in to confirm. Once confirmed the bet locks permanently.</div>
+            <div style={S.sectionDivider}>⚖️ Referee (Optional)</div>
+            <div style={S.refBox}>
+              <div style={S.refInfo}>Add a neutral third party who must confirm the outcome before funds are released. Their ruling is final.</div>
+              <F label="Referee Email"><input style={S.input} type="email" placeholder="referee@email.com" value={betForm.referee_email} onChange={e=>setBetForm({...betForm,referee_email:e.target.value})} /></F>
+            </div>
+            <div style={S.sectionDivider}>💸 Venmo (Optional)</div>
+            <div style={S.g2}>
+              <F label="Your Venmo @"><input style={S.input} placeholder="@yourvenmo" value={betForm.party1_venmo} onChange={e=>setBetForm({...betForm,party1_venmo:e.target.value})} /></F>
+              <F label="Opponent Venmo @"><input style={S.input} placeholder="@theirvenmo" value={betForm.party2_venmo} onChange={e=>setBetForm({...betForm,party2_venmo:e.target.value})} /></F>
+            </div>
+            <div style={S.note}>⚠️ Once confirmed by both parties the bet locks permanently.</div>
             <button style={S.subBtn} onClick={createBet}>Create Bet →</button>
           </div>
         </div>
@@ -298,6 +366,16 @@ export default function App() {
               <F label="Total Stake ($) *"><input style={S.input} type="number" placeholder="0.00" value={parlayForm.totalStake} onChange={e=>setParlayForm({...parlayForm,totalStake:e.target.value})} /></F>
               <F label="Your Email" full><input style={{...S.input,opacity:0.6}} value={myEmail} disabled /></F>
               <F label="Opponent Email *" full><input style={S.input} type="email" placeholder="opponent@email.com" value={parlayForm.party2_email} onChange={e=>setParlayForm({...parlayForm,party2_email:e.target.value})} /></F>
+            </div>
+            <div style={S.sectionDivider}>⚖️ Referee (Optional)</div>
+            <div style={S.refBox}>
+              <div style={S.refInfo}>Neutral third party who confirms the final outcome.</div>
+              <F label="Referee Email"><input style={S.input} type="email" placeholder="referee@email.com" value={parlayForm.referee_email} onChange={e=>setParlayForm({...parlayForm,referee_email:e.target.value})} /></F>
+            </div>
+            <div style={S.sectionDivider}>💸 Venmo (Optional)</div>
+            <div style={S.g2}>
+              <F label="Your Venmo @"><input style={S.input} placeholder="@yourvenmo" value={parlayForm.party1_venmo} onChange={e=>setParlayForm({...parlayForm,party1_venmo:e.target.value})} /></F>
+              <F label="Opponent Venmo @"><input style={S.input} placeholder="@theirvenmo" value={parlayForm.party2_venmo} onChange={e=>setParlayForm({...parlayForm,party2_venmo:e.target.value})} /></F>
             </div>
             <div style={S.legsHdr}><span style={{fontWeight:"bold",color:T.text}}>Legs ({legs.length})</span><button style={S.addLeg} onClick={()=>setLegs(p=>[...p,{...blankLeg}])}>+ Add Leg</button></div>
             {legs.map((leg,i)=>(
@@ -322,21 +400,86 @@ export default function App() {
         const bet = bets.find(b=>b.id===selected.id)||selected;
         const isParty1 = bet.party1_id===session.user.id;
         const isParty2 = myEmail===bet.party2_email?.toLowerCase();
+        const isRef = myEmail===bet.referee_email?.toLowerCase();
+        const loserVenmo = bet.winner===session.user.email ? bet.party2_venmo : bet.party1_venmo;
+        const winnerVenmo = bet.winner===session.user.email ? bet.party1_venmo : bet.party2_venmo;
         return (
           <div style={S.page}><Back onClick={()=>setView("list")} />
             <div style={S.card}>
               <DHeader id={bet.id} cat={bet.category} status={bet.status} />
+              {bet.referee_email && <div style={S.refBadge}>⚖️ Refereed by {bet.referee_email}</div>}
               <Pot amount={`$${bet.amount}`} label="Pot" sub="Winner takes all" />
               <div style={S.parties}>
-                <div style={{...S.pBox,...(bet.winner===myEmail?S.pWin:{})}}><div style={S.pName}>{isParty1?"You":bet.party2_email}</div><div style={S.pRole}>Creator</div>{bet.winner===myEmail&&isParty1&&<div style={S.wBdg}>🏆 Winner</div>}</div>
+                <div style={{...S.pBox,...(bet.winner===myEmail&&isParty1?S.pWin:{})}}><div style={S.pName}>{isParty1?"You":bet.party2_email}</div><div style={S.pRole}>Creator</div>{bet.winner===session.user.email&&isParty1&&<div style={S.wBdg}>🏆 Winner</div>}</div>
                 <div style={S.vsCirc}>VS</div>
                 <div style={{...S.pBox,...(bet.winner===bet.party2_email?S.pWin:{})}}><div style={S.pName}>{bet.party2_email}</div><div style={S.pRole}>{bet.party2_id?"✅ Confirmed":"⏳ Pending"}</div>{bet.winner===bet.party2_email&&<div style={S.wBdg}>🏆 Winner</div>}</div>
               </div>
-              <Sec title="Details"><Row k="Description" v={bet.description}/>{bet.terms&&<Row k="Terms" v={bet.terms}/>}<Row k="Created" v={fmt(bet.created_at)}/></Sec>
+              <Sec title="Details">
+                <Row k="Description" v={bet.description}/>
+                {bet.terms&&<Row k="Terms" v={bet.terms}/>}
+                <Row k="Created" v={fmt(bet.created_at)}/>
+                {bet.referee_email&&<Row k="Referee" v={bet.referee_email}/>}
+                {bet.party1_venmo&&<Row k="Creator Venmo" v={bet.party1_venmo}/>}
+                {bet.party2_venmo&&<Row k="Opponent Venmo" v={bet.party2_venmo}/>}
+              </Sec>
+
               {bet.status===STATUS.PENDING&&isParty2&&<ABox color={T.orange}><div style={S.aTitle}>⏳ Confirm this bet</div><div style={S.aSub}>You've been challenged! Lock it in to accept.</div><button style={S.okBtn} onClick={()=>confirmBet(bet)}>Confirm & Lock 🔒</button></ABox>}
               {bet.status===STATUS.PENDING&&isParty1&&<ABox color={T.orange}><div style={S.aTitle}>⏳ Waiting for {bet.party2_email}</div><div style={S.aSub}>Ask them to log in and confirm.</div></ABox>}
-              {bet.status===STATUS.ACTIVE&&(isParty1||isParty2)&&<ABox color={T.green}><div style={S.aTitle}>🏆 Settle the Bet</div><select style={S.input} value={winnerSel} onChange={e=>setWinnerSel(e.target.value)}><option value="">— Select Winner —</option><option value="party1">{isParty1?"You":bet.party2_email}</option><option value="party2">{bet.party2_email}</option></select><div style={{display:"flex",gap:10}}><button style={S.okBtn} onClick={()=>settleBet(bet)}>Settle ✅</button><button style={S.badBtn} onClick={()=>disputeBet(bet)}>Dispute ⚠️</button></div></ABox>}
-              {bet.status===STATUS.SETTLED&&<ABox color={T.blue}><div style={S.aTitle}>✅ Settled</div><div style={S.aSub}>{bet.winner} wins ${bet.amount}!</div></ABox>}
+
+              {bet.status===STATUS.ACTIVE&&(isParty1||isParty2)&&(
+                <ABox color={T.green}>
+                  <div style={S.aTitle}>🏆 Submit Outcome</div>
+                  {bet.referee_email&&<div style={S.aSub}>⚖️ Referee will confirm before settling.</div>}
+                  <select style={S.input} value={winnerSel} onChange={e=>setWinnerSel(e.target.value)}>
+                    <option value="">— Select Winner —</option>
+                    <option value="party1">{isParty1?"You":bet.party2_email}</option>
+                    <option value="party2">{bet.party2_email}</option>
+                  </select>
+                  <div style={{display:"flex",gap:10}}>
+                    <button style={S.okBtn} onClick={()=>submitOutcome(bet)}>Submit {bet.referee_email?"for Review":"& Settle"} ✅</button>
+                    <button style={S.badBtn} onClick={()=>disputeBet(bet)}>Dispute ⚠️</button>
+                  </div>
+                </ABox>
+              )}
+
+              {bet.status===STATUS.AWAITING_REF&&isRef&&(
+                <ABox color={T.purple}>
+                  <div style={S.aTitle}>⚖️ Referee Action Required</div>
+                  <div style={S.aSub}>Submitted outcome: <strong style={{color:T.orange}}>{bet.winner}</strong> wins ${bet.amount}</div>
+                  <div style={{display:"flex",gap:10}}>
+                    <button style={S.okBtn} onClick={()=>refereeConfirm(bet)}>Confirm Outcome ✅</button>
+                    <button style={S.badBtn} onClick={()=>refereeOverride(bet)}>Override ⚖️</button>
+                  </div>
+                </ABox>
+              )}
+
+              {bet.status===STATUS.AWAITING_REF&&!isRef&&(
+                <ABox color={T.purple}>
+                  <div style={S.aTitle}>⚖️ Awaiting Referee</div>
+                  <div style={S.aSub}>{bet.referee_email} must confirm the outcome.</div>
+                </ABox>
+              )}
+
+              {bet.status===STATUS.SETTLED&&(
+                <ABox color={T.blue}>
+                  <div style={S.aTitle}>✅ Settled — {bet.winner} wins ${bet.amount}!</div>
+                  {(bet.party1_venmo||bet.party2_venmo)&&(
+                    <div>
+                      <div style={S.aSub}>Pay up on Venmo:</div>
+                      {bet.party1_venmo&&bet.party2_venmo&&(
+                        <button style={S.venmoBtn} onClick={()=>openVenmo(
+                          bet.winner===session.user.email ? (isParty1?bet.party2_venmo:bet.party1_venmo) : (isParty1?bet.party2_venmo:bet.party1_venmo),
+                          bet.amount,
+                          `SnoVale bet: ${bet.description}`
+                        )}>
+                          💸 Pay on Venmo
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </ABox>
+              )}
+
               {bet.status===STATUS.DISPUTED&&<ABox color={T.red}><div style={S.aTitle}>⚠️ Disputed</div><div style={S.aSub}>Resolve manually.</div></ABox>}
               <Log history={bet.history}/>
             </div>
@@ -348,11 +491,13 @@ export default function App() {
         const par = parlays.find(p=>p.id===selected.id)||selected;
         const isParty1 = par.party1_id===session.user.id;
         const isParty2 = myEmail===par.party2_email?.toLowerCase();
+        const isRef = myEmail===par.referee_email?.toLowerCase();
         const sc = par.legs.filter(l=>l.settled).length;
         return (
           <div style={S.page}><Back onClick={()=>setView("list")} />
             <div style={S.card}>
               <DHeader id={par.id} cat={`🔗 ${par.legs.length}-Leg Parlay`} status={par.status}/>
+              {par.referee_email&&<div style={S.refBadge}>⚖️ Refereed by {par.referee_email}</div>}
               <div style={{fontSize:14,color:T.textDim,marginBottom:16,fontStyle:"italic"}}>{par.name}</div>
               <Pot amount={`$${par.total_stake}`} label="Parlay Pot" sub={`${sc}/${par.legs.length} legs settled`}/>
               <div style={S.parties}>
@@ -372,10 +517,33 @@ export default function App() {
                   </div>
                 ))}
               </Sec>
+
               {par.status===STATUS.PENDING&&isParty2&&<ABox color={T.orange}><div style={S.aTitle}>⏳ Confirm this parlay</div><button style={S.okBtn} onClick={()=>confirmParlay(par)}>Confirm Parlay 🔒</button></ABox>}
               {par.status===STATUS.PENDING&&isParty1&&<ABox color={T.orange}><div style={S.aTitle}>⏳ Waiting for {par.party2_email}</div><div style={S.aSub}>Ask them to log in and confirm.</div></ABox>}
               {par.status===STATUS.ACTIVE&&sc<par.legs.length&&(isParty1||isParty2)&&<div style={{textAlign:"right",marginTop:12}}><button style={S.badBtn} onClick={()=>disputeParlay(par)}>Flag Dispute ⚠️</button></div>}
-              {par.status===STATUS.SETTLED&&<ABox color={T.blue}><div style={S.aTitle}>✅ Parlay Settled</div><div style={S.aSub}>{par.overall_winner?.includes("SPLIT")?"Split — no winner.":`${par.overall_winner} wins $${par.total_stake}`}</div></ABox>}
+
+              {par.status===STATUS.AWAITING_REF&&isRef&&(
+                <ABox color={T.purple}>
+                  <div style={S.aTitle}>⚖️ Referee Action Required</div>
+                  <div style={S.aSub}>Submitted: <strong style={{color:T.orange}}>{par.overall_winner}</strong> wins ${par.total_stake}</div>
+                  <button style={S.okBtn} onClick={()=>refereeConfirmParlay(par)}>Confirm Outcome ✅</button>
+                </ABox>
+              )}
+              {par.status===STATUS.AWAITING_REF&&!isRef&&<ABox color={T.purple}><div style={S.aTitle}>⚖️ Awaiting Referee</div><div style={S.aSub}>{par.referee_email} must confirm.</div></ABox>}
+
+              {par.status===STATUS.SETTLED&&(
+                <ABox color={T.blue}>
+                  <div style={S.aTitle}>✅ Parlay Settled</div>
+                  <div style={S.aSub}>{par.overall_winner?.includes("SPLIT")?"Split — no winner.":`${par.overall_winner} wins $${par.total_stake}`}</div>
+                  {(par.party1_venmo&&par.party2_venmo)&&(
+                    <button style={S.venmoBtn} onClick={()=>openVenmo(
+                      isParty1?par.party2_venmo:par.party1_venmo,
+                      par.total_stake,
+                      `SnoVale parlay: ${par.name}`
+                    )}>💸 Pay on Venmo</button>
+                  )}
+                </ABox>
+              )}
               {par.status===STATUS.DISPUTED&&<ABox color={T.red}><div style={S.aTitle}>⚠️ Disputed</div><div style={S.aSub}>Resolve manually.</div></ABox>}
               <Log history={par.history}/>
             </div>
@@ -401,7 +569,7 @@ function LegSettler({leg,par,onSettle}){
 function BetCard({bet,onClick}){
   return(
     <div style={S.betCard} className="hov" onClick={onClick}>
-      <div style={S.cTop}><span style={S.idTag}>{bet.id}</span><Bdg status={bet.status}/></div>
+      <div style={S.cTop}><span style={S.idTag}>{bet.id}{bet.referee_email&&<span style={{color:"#5b2d8a",marginLeft:6}}>⚖️</span>}</span><Bdg status={bet.status}/></div>
       <div style={S.cMid}><div style={S.pts}>You <span style={S.vs}>VS</span> {bet.party2_email}</div><div style={S.amt}>${bet.amount}</div></div>
       <div style={S.cBot}><span style={S.cat}>{bet.category}</span><span style={S.desc}>{bet.description}</span></div>
     </div>
@@ -412,7 +580,7 @@ function ParlayCard({par,onClick}){
   const sc=par.legs.filter(l=>l.settled).length;
   return(
     <div style={S.betCard} className="hov" onClick={onClick}>
-      <div style={S.cTop}><span style={S.idTag}>{par.id} <span style={{color:"#e8751a"}}>· {par.legs.length} legs</span></span><Bdg status={par.status}/></div>
+      <div style={S.cTop}><span style={S.idTag}>{par.id}{par.referee_email&&<span style={{color:"#5b2d8a",marginLeft:6}}>⚖️</span>} <span style={{color:"#e8751a"}}>· {par.legs.length} legs</span></span><Bdg status={par.status}/></div>
       <div style={S.cMid}><div style={S.pts}>You <span style={S.vs}>VS</span> {par.party2_email}</div><div style={S.amt}>${par.total_stake}</div></div>
       <div style={S.cBot}><span style={S.cat}>🔗 Parlay</span><span style={S.desc}>{par.name} · {sc}/{par.legs.length} settled</span></div>
     </div>
@@ -475,6 +643,10 @@ const S={
   note:{margin:"16px 0 12px",fontSize:12,color:"#6b7a8a",fontStyle:"italic"},
   subBtn:{width:"100%",padding:"13px",background:"#e8751a",color:"#000",border:"none",borderRadius:8,fontSize:15,fontWeight:"bold",cursor:"pointer"},
   info:{background:"#2e343c",border:"1px solid #3a424d",borderRadius:8,padding:"12px 14px",fontSize:13,color:"#6b7a8a",marginBottom:18,lineHeight:1.5},
+  sectionDivider:{fontSize:13,fontWeight:"bold",color:T.orange,margin:"20px 0 10px",borderBottom:`1px solid #3a424d`,paddingBottom:8},
+  refBox:{background:"#1a1040",border:"1px solid #3a424d",borderRadius:10,padding:14,marginBottom:12,display:"flex",flexDirection:"column",gap:10},
+  refInfo:{fontSize:12,color:"#6b7a8a",lineHeight:1.5},
+  refBadge:{background:"#2a1a4a",border:"1px solid #5b2d8a",borderRadius:8,padding:"8px 12px",fontSize:12,color:"#a78bda",marginBottom:16},
   legsHdr:{display:"flex",justifyContent:"space-between",alignItems:"center",margin:"20px 0 12px"},
   addLeg:{padding:"6px 14px",background:"#7a3c0d",color:"#e8751a",border:"1px solid #e8751a",borderRadius:6,fontSize:12,cursor:"pointer",fontWeight:"bold"},
   legCard:{background:"#2e343c",border:"1px solid #3a424d",borderRadius:10,padding:"14px",marginBottom:10},
@@ -503,6 +675,7 @@ const S={
   aSub:{fontSize:13,color:"#6b7a8a"},
   okBtn:{padding:"11px",background:"#2e7d52",color:"#fff",border:"none",borderRadius:8,fontSize:13,fontWeight:"bold",cursor:"pointer"},
   badBtn:{padding:"11px",background:"#8b2525",color:"#fff",border:"none",borderRadius:8,fontSize:13,fontWeight:"bold",cursor:"pointer"},
+  venmoBtn:{padding:"11px 20px",background:"#008CFF",color:"#fff",border:"none",borderRadius:8,fontSize:14,fontWeight:"bold",cursor:"pointer",width:"100%"},
   legDetail:{background:"#1c1f23",border:"1px solid #3a424d",borderRadius:10,padding:"14px",marginBottom:10},
   logRow:{display:"flex",gap:10,padding:"7px 0",borderBottom:"1px solid #2e343c"},
   logDot:{color:"#e8751a",fontSize:8,marginTop:4,flexShrink:0},
