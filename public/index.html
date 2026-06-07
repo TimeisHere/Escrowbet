@@ -2,17 +2,33 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="theme-color" content="#1c1f23" />
-    <meta name="description" content="EscrowBet — Trusted side bet tracker" />
-    <title>EscrowBet</title>
+    <meta name="description" content="SnoVale — Trusted Side Bet Tracker" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="SnoVale" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <link rel="manifest" href="/manifest.json" />
+    <link rel="apple-touch-icon" href="/icon-512.png" />
+    <title>SnoVale</title>
     <style>
-      body { margin: 0; background: #1c1f23; }
+      * { -webkit-tap-highlight-color: transparent; }
+      body { margin: 0; background: #1c1f23; overscroll-behavior: none; }
+      html { overflow: hidden; height: 100%; }
+      body { height: 100%; overflow: auto; -webkit-overflow-scrolling: touch; }
     </style>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
   </head>
   <body>
-    <noscript>You need to enable JavaScript to run this app.</noscript>
+    <noscript>You need to enable JavaScript to run SnoVale.</noscript>
     <div id="root"></div>
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('/sw.js');
+        });
+      }
+    </script>
   </body>
 </html>
