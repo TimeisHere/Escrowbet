@@ -1,0 +1,25 @@
+{
+  "short_name": "SnoVale",
+  "name": "SnoVale — Side Bet Tracker",
+  "description": "Trusted side bet tracker for golf, gaming and more",
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "type": "image/png",
+      "sizes": "192x192",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon-512.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "any maskable"
+    }
+  ],
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#1c1f23",
+  "theme_color": "#e8751a",
+  "scope": "/"
+}
