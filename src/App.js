@@ -217,7 +217,7 @@ export default function App() {
       <style>{css}</style>
       <div style={S.authCard}>
         <div style={{fontSize:40, textAlign:"center", color:T.orange}}>⚖</div>
-        <div style={{fontSize:24, fontWeight:"bold", letterSpacing:3, color:T.orange, textAlign:"center"}}>ESCROW BET</div>
+        <div style={{fontSize:24, fontWeight:"bold", letterSpacing:3, color:T.orange, textAlign:"center"}}>SnoVale</div>
         <div style={{fontSize:11, color:T.textDim, letterSpacing:2, textTransform:"uppercase", textAlign:"center", marginBottom:8}}>Side Bet Tracker</div>
         <div style={S.authTabs}>
           <button style={{...S.authTab,...(authView==="login"?S.authTabOn:{})}} onClick={()=>setAuthView("login")}>Login</button>
@@ -238,7 +238,7 @@ export default function App() {
       <header style={S.header}>
         <div style={S.logo}>
           <span style={{fontSize:28, color:T.orange}}>⚖</span>
-          <div><div style={{fontSize:20, fontWeight:"bold", letterSpacing:3, color:T.orange}}>ESCROW BET</div><div style={{fontSize:10, color:T.textDim, letterSpacing:2, textTransform:"uppercase"}}>Side Bet Tracker</div></div>
+          <div><div style={{fontSize:20, fontWeight:"bold", letterSpacing:3, color:T.orange}}>SnoVale</div><div style={{fontSize:10, color:T.textDim, letterSpacing:2, textTransform:"uppercase"}}>Side Bet Tracker</div></div>
         </div>
         <div style={{display:"flex", alignItems:"center", gap:16, flexWrap:"wrap"}}>
           <div style={S.stats}>
