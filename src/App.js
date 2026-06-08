@@ -65,15 +65,17 @@ function fmt(iso){ return new Date(iso).toLocaleString(); }
 function now(){ return new Date().toISOString(); }
 
 function CardAuthForm({ bet, session, role, onSuccess, onCancel }) {
-  const cardRef = useRef(null);
-  const cardElementRef = useRef(null);
+ const cardRef = useRef(null);
+const cardElementRef = useRef(null);
+const stripeRef = useRef(null);
   const [cardReady, setCardReady] = useState(false);
   const [processing, setProcessing] = useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => {
     if(!window.Stripe || !cardRef.current) return;
-    const stripe = window.Stripe(STRIPE_PK);
+   const stripe = stripeRef.current;
+const stripe = stripeRef.current;
     const elements = stripe.elements();
     const card = elements.create("card", {
       style: {
