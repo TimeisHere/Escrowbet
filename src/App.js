@@ -695,8 +695,8 @@ fetchBets();
               {bet.status===STATUS.AWAITING_P1_AUTH&&isParty1&&showCardAuth&&<CardAuthForm bet={bet} session={session} role="party1" onSuccess={(pid)=>handleP1CardAuth(bet,pid)} onCancel={()=>setShowCardAuth(false)} />}
               {bet.status===STATUS.AWAITING_P1_AUTH&&!isParty1&&<ABox color={T.blue}><div style={S.aTitle}>⏳ Awaiting creator's card</div></ABox>}
 
-              {bet.status===STATUS.PENDING&&isParty2&&!showCardAuth&&<ABox color={T.orange}><div style={S.aTitle}>🎯 You've been challenged!</div><div style={S.aSub}><strong>{bet.description}</strong> · ${bet.amount} stake</div><div style={S.aSub}>Confirm and authorize your card to lock the bet in. You're only charged if you lose.</div><button style={S.okBtn} onClick={()=>confirmBet(bet)}>Accept & Enter Card →</button></ABox>}
-              {bet.status===STATUS.PENDING&&isParty2&&showCardAuth&&<CardAuthForm bet={bet} session={session} role="party2" onSuccess={(pid)=>handleP2CardAuth(bet,pid)} onCancel={()=>setShowCardAuth(false)} />}
+              {bet.status===STATUS.PENDING&&isParty2&&<ABox color={T.orange}><div style={S.aTitle}>🎯 You've been challenged!</div><div style={S.aSub}><strong>{bet.description}</strong> · ${bet.amount} stake</div><div style={S.aSub}>Confirm and authorize your card to lock the bet in. You're only charged if you lose.</div><button style={S.okBtn} onClick={()=>confirmBet(bet)}>Accept & Enter Card →</button></ABox>}
+              {bet.status===STATUS.PENDING&&isParty2&&<CardAuthForm bet={bet} session={session} role="party2" onSuccess={(pid)=>handleP2CardAuth(bet,pid)} onCancel={()=>setShowCardAuth(false)} />}
               {bet.status===STATUS.PENDING&&isParty1&&<ABox color={T.orange}><div style={S.aTitle}>⏳ Waiting for {bet.party2_email}</div><div style={S.aSub}>Your card is authorized. They've been emailed. Waiting for them to confirm and authorize their card.</div></ABox>}
               {bet.status===STATUS.AWAITING_P2_AUTH&&!isParty2&&<ABox color={T.blue}><div style={S.aTitle}>💳 Opponent authorizing card</div></ABox>}
 
