@@ -29,7 +29,6 @@ async function dbUpdate(table, token, id, data) {
   const r = await fetch(`${SUPA_URL}/rest/v1/${table}?id=eq.${id}`, { method:"PATCH", headers:{...h,"Authorization":`Bearer ${token}`,"Prefer":"return=representation"}, body:JSON.stringify(data) });
   return r.json();
 }
-
 async function sendNotification(to, subject, message, betId) {
   try {
     await fetch("/api/send-notification", {
@@ -75,22 +74,14 @@ function CardAuthForm({ bet, session, role, onSuccess, onCancel }) {
   useEffect(() => {
     let mounted = true;
     function init() {
-      if(!window.Stripe || !cardRef.current) {
-        setTimeout(init, 100);
-        return;
-      }
+      if(!window.Stripe || !cardRef.current) { setTimeout(init, 100); return; }
       if(!mounted) return;
       const stripe = window.Stripe(STRIPE_PK);
       stripeRef.current = stripe;
       const elements = stripe.elements();
       const card = elements.create("card", {
         style: {
-          base: {
-            color:"#d4dbe3",
-            fontFamily:"Trebuchet MS, sans-serif",
-            fontSize:"16px",
-            "::placeholder":{ color:"#6b7a8a" }
-          },
+          base: { color:"#d4dbe3", fontFamily:"Trebuchet MS, sans-serif", fontSize:"16px", "::placeholder":{ color:"#6b7a8a" } },
           invalid: { color:"#e8751a" }
         }
       });
@@ -112,31 +103,17 @@ function CardAuthForm({ bet, session, role, onSuccess, onCancel }) {
     try {
       const amount = bet.amount || bet.total_stake;
       const r = await fetch("/api/authorize-card", {
-        method:"POST",
-        headers:{"Content-Type":"application/json"},
-        body: JSON.stringify({
-          amount,
-          betId: bet.id,
-          email: session.user.email,
-          role,
-          description: bet.description || bet.name
-        })
+        method:"POST", headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({ amount, betId:bet.id, email:session.user.email, role, description:bet.description||bet.name })
       });
       const { clientSecret, paymentIntentId, error:apiError } = await r.json();
       if(apiError) { setError(apiError); setProcessing(false); return; }
       const { error:stripeError, paymentIntent } = await stripeRef.current.confirmCardPayment(clientSecret, {
-        payment_method: {
-          card: cardElementRef.current,
-          billing_details: { email: session.user.email }
-        }
+        payment_method: { card: cardElementRef.current, billing_details: { email: session.user.email } }
       });
       if(stripeError) { setError(stripeError.message); setProcessing(false); return; }
-      if(paymentIntent.status === "requires_capture") {
-        onSuccess(paymentIntentId);
-      } else {
-        setError(`Unexpected status: ${paymentIntent.status}. Please try again.`);
-        setProcessing(false);
-      }
+      if(paymentIntent.status === "requires_capture") onSuccess(paymentIntentId);
+      else { setError(`Unexpected status: ${paymentIntent.status}`); setProcessing(false); }
     } catch(e) { setError(e.message); setProcessing(false); }
   }
 
@@ -145,23 +122,18 @@ function CardAuthForm({ bet, session, role, onSuccess, onCancel }) {
     <div style={S.paymentForm}>
       <div style={S.aTitle}>💳 Authorize Card to Lock Bet</div>
       <div style={S.aSub}>A hold of <strong style={{color:T.orange}}>${amount}</strong> will appear on your card.</div>
-      <div style={{...S.aSub, color:T.green}}>✅ You are only charged if you LOSE. Winners are never charged.</div>
+      <div style={{...S.aSub, color:T.green}}>✅ You are only charged if you LOSE.</div>
       <div style={S.cardBox}>
         <div ref={cardRef} style={{minHeight:24, padding:4}} />
       </div>
       {error && <div style={{color:T.red, fontSize:13, padding:"8px 0"}}>{error}</div>}
       <div style={{display:"flex", gap:10}}>
-        <button
-          style={{...S.okBtn, opacity:(!cardReady||processing)?0.6:1}}
-          onClick={handleAuthorize}
-          disabled={!cardReady||processing}>
+        <button style={{...S.okBtn, opacity:(!cardReady||processing)?0.6:1}} onClick={handleAuthorize} disabled={!cardReady||processing}>
           {processing ? "⏳ Authorizing..." : `Authorize $${amount} Hold 🔒`}
         </button>
         <button style={S.badBtn} onClick={onCancel} disabled={processing}>Cancel</button>
       </div>
-      <div style={{fontSize:11, color:T.textMuted, marginTop:4}}>
-        🔒 Powered by Stripe. Card details never touch SnoVale servers.
-      </div>
+      <div style={{fontSize:11, color:T.textMuted, marginTop:4}}>🔒 Powered by Stripe. Card details never touch SnoVale servers.</div>
     </div>
   );
 }
@@ -180,7 +152,6 @@ export default function App() {
   const [selected, setSelected] = useState(null);
   const [filter, setFilter] = useState("all");
   const [toast, setToast] = useState(null);
-  const [showCardAuth, setShowCardAuth] = useState(true);
   const blankBet = { party2_email:"", amount:"", category:CATEGORIES[0], description:"", terms:"", referee_email:"" };
   const [betForm, setBetForm] = useState(blankBet);
   const blankParlay = { name:"", party2_email:"", totalStake:"", referee_email:"" };
@@ -238,18 +209,18 @@ export default function App() {
       referee_email: f.referee_email ? f.referee_email.toLowerCase() : null,
       party2_id: null, amount: parseFloat(f.amount),
       category: f.category, description: f.description, terms: f.terms,
-      status: STATUS.AWAITING_P1_AUTH,
-      winner: null, payment_intent_id: null, payment_status: null,
+      status: STATUS.AWAITING_P1_AUTH, winner: null,
+      payment_intent_id: null, payment_status: null,
       party1_payment_intent_id: null, party2_payment_intent_id: null,
       party1_payment_authorized: false, party2_payment_authorized: false,
       created_at: now(),
       history: [{ action:`Bet created by ${session.user.email}`, time:now() }]
     };
-    await dbInsert("bets", session.access_token, bet);
+    const inserted = await dbInsert("bets", session.access_token, bet);
+    const newBet = Array.isArray(inserted) ? inserted[0] : bet;
     setBetForm(blankBet);
-    setSelected(bet);
+    setSelected(newBet);
     setView("detailBet");
-    setShowCardAuth(true);
     fetchBets();
     toast_(`Bet created! Authorize your card to lock it in.`);
   }
@@ -264,25 +235,10 @@ export default function App() {
     await sendNotification(
       bet.party2_email,
       `🏔 SnoVale — You've been challenged!`,
-      `<strong>${session.user.email}</strong> has challenged you to a bet!<br><br>
-       <strong>Bet:</strong> ${bet.description}<br>
-       <strong>Stake:</strong> $${bet.amount}<br>
-       <strong>Category:</strong> ${bet.category}<br><br>
-       Log in to SnoVale to confirm and lock in your card.`,
+      `<strong>${session.user.email}</strong> has challenged you to a bet!<br><br><strong>Bet:</strong> ${bet.description}<br><strong>Stake:</strong> $${bet.amount}<br><strong>Category:</strong> ${bet.category}<br><br>Log in to SnoVale to confirm and authorize your card.`,
       bet.id
     );
-    if(bet.referee_email) {
-      await sendNotification(
-        bet.referee_email,
-        `🏔 SnoVale — You've been added as a referee`,
-        `You've been added as a neutral referee for a bet between <strong>${session.user.email}</strong> and <strong>${bet.party2_email}</strong>.<br><br>
-         <strong>Bet:</strong> ${bet.description}<br>
-         <strong>Stake:</strong> $${bet.amount}<br><br>
-         You'll be asked to confirm the outcome when both parties have submitted their result.`,
-        bet.id
-      );
-    }
-    setShowCardAuth(false); fetchBets(); setView("list");
+    fetchBets(); setView("list");
     toast_("Card authorized! Opponent notified by email. 📧");
   }
 
@@ -293,30 +249,21 @@ export default function App() {
       status: STATUS.AWAITING_P2_AUTH, party2_id: session.user.id,
       history: [...bet.history, { action:`${session.user.email} confirmed — authorizing card`, time:now() }]
     });
-    setShowCardAuth(true);
-toast_("Confirmed! Now authorize your card.");
-fetchBets();
+    const updated = {...bet, status: STATUS.AWAITING_P2_AUTH, party2_id: session.user.id};
+    setSelected(updated);
+    fetchBets();
+    toast_("Confirmed! Now authorize your card.");
   }
 
   async function handleP2CardAuth(bet, paymentIntentId) {
-    const updatedBet = {
+    await dbUpdate("bets", session.access_token, bet.id, {
       status: STATUS.ACTIVE,
       party2_payment_intent_id: paymentIntentId,
       party2_payment_authorized: true,
       history: [...bet.history, { action:`${session.user.email} authorized card — BET FULLY LOCKED & FUNDED 🔒💳`, time:now() }]
-    };
-    await dbUpdate("bets", session.access_token, bet.id, updatedBet);
-    await sendNotification(
-      bet.party2_email === session.user.email ? "creator" : bet.party2_email,
-      `🏔 SnoVale — Bet is LOCKED & FUNDED`,
-      `Both parties have authorized their cards. The bet is now fully locked and funded!<br><br>
-       <strong>Bet:</strong> ${bet.description}<br>
-       <strong>Stake:</strong> $${bet.amount}<br><br>
-       When the bet concludes, log in to submit the outcome. Payment will process automatically.`,
-      bet.id
-    );
-    setShowCardAuth(false); fetchBets(); setView("list");
-    toast_("Bet fully locked and funded! Both cards authorized. 🔒💳");
+    });
+    fetchBets(); setView("list");
+    toast_("Bet fully locked and funded! 🔒💳");
   }
 
   async function submitOutcome(bet) {
@@ -328,16 +275,8 @@ fetchBets();
         status: STATUS.AWAITING_REF, winner: winnerEmail,
         history: [...bet.history, { action:`Outcome submitted: ${winnerEmail} wins — awaiting referee`, time:now() }]
       });
-      await sendNotification(
-        bet.referee_email,
-        `🏔 SnoVale — Referee action required`,
-        `A bet outcome has been submitted and needs your confirmation.<br><br>
-         <strong>Submitted outcome:</strong> ${winnerEmail} wins $${bet.amount}<br>
-         <strong>Bet:</strong> ${bet.description}<br><br>
-         Log in to confirm or override the outcome. Payment will process automatically after your confirmation.`,
-        bet.id
-      );
-      toast_("Submitted! Referee notified by email. ⚖️");
+      await sendNotification(bet.referee_email, `🏔 SnoVale — Referee action required`, `Outcome submitted: ${winnerEmail} wins $${bet.amount}. Log in to confirm.`, bet.id);
+      toast_("Submitted! Referee notified. ⚖️");
     } else {
       await settleWithCapture(bet, winnerEmail, loserEmail);
     }
@@ -361,10 +300,10 @@ fetchBets();
       if(result.error) throw new Error(result.error);
       await dbUpdate("bets", session.access_token, bet.id, {
         status: STATUS.SETTLED, winner: winnerEmail, payment_status:"captured",
-        history: [...bet.history, { action:`💳 ${winnerEmail} wins $${bet.amount}! Payment captured automatically.`, time:now() }]
+        history: [...bet.history, { action:`💳 ${winnerEmail} wins $${bet.amount}! Payment captured.`, time:now() }]
       });
-      await sendNotification(winnerEmail, `🏔 SnoVale — You won! 🏆`, `Congratulations! You won your bet against ${loserEmail}.<br><br><strong>Bet:</strong> ${bet.description}<br><strong>Amount:</strong> $${bet.amount}<br><br>Payment has been processed automatically. 💳`, bet.id);
-      await sendNotification(loserEmail, `🏔 SnoVale — Bet Settled`, `Your bet has been settled. ${winnerEmail} won $${bet.amount}.<br><br><strong>Bet:</strong> ${bet.description}<br><br>Your card has been charged. Better luck next time! 🤝`, bet.id);
+      await sendNotification(winnerEmail, `🏔 SnoVale — You won! 🏆`, `You won $${bet.amount}! Payment processed. 💳`, bet.id);
+      await sendNotification(loserEmail, `🏔 SnoVale — Bet Settled`, `${winnerEmail} won. Your card has been charged $${bet.amount}.`, bet.id);
       toast_(`${winnerEmail} wins! Payment processed. 🏆💳`);
     } catch(e) {
       await dbUpdate("bets", session.access_token, bet.id, {
@@ -425,11 +364,12 @@ fetchBets();
       created_at: now(),
       history: [{ action:`Parlay created by ${session.user.email}`, time:now() }]
     };
-    await dbInsert("parlays", session.access_token, parlay);
+    const inserted = await dbInsert("parlays", session.access_token, parlay);
+    const newParlay = Array.isArray(inserted) ? inserted[0] : parlay;
     setParlayForm(blankParlay); setLegs([{...blankLeg}]);
-    setSelected(parlay);
+    setSelected(newParlay);
     setView("detailParlay");
-    setShowCardAuth(true);
+    setTab("parlays");
     fetchParlays();
     toast_(`Parlay created! Authorize your card.`);
   }
@@ -441,16 +381,8 @@ fetchBets();
       party1_payment_authorized: true,
       history: [...par.history, { action:`${session.user.email} authorized card 💳`, time:now() }]
     });
-    await sendNotification(
-      par.party2_email,
-      `🏔 SnoVale — You've been challenged to a Parlay!`,
-      `<strong>${session.user.email}</strong> has challenged you to a ${par.legs.length}-leg parlay!<br><br>
-       <strong>Parlay:</strong> ${par.name}<br>
-       <strong>Total Stake:</strong> $${par.total_stake}<br><br>
-       Log in to SnoVale to confirm and authorize your card.`,
-      par.id
-    );
-    setShowCardAuth(false); fetchParlays(); setView("list");
+    await sendNotification(par.party2_email, `🏔 SnoVale — You've been challenged to a Parlay!`, `${session.user.email} challenged you to a ${par.legs.length}-leg parlay! Stake: $${par.total_stake}. Log in to confirm.`, par.id);
+    fetchParlays(); setView("list");
     toast_("Card authorized! Opponent notified. 📧");
   }
 
@@ -461,7 +393,9 @@ fetchBets();
       status: STATUS.AWAITING_P2_AUTH, party2_id: session.user.id,
       history: [...par.history, { action:`${session.user.email} confirmed — authorizing card`, time:now() }]
     });
-    fetchParlays(); setShowCardAuth(true);
+    const updated = {...par, status: STATUS.AWAITING_P2_AUTH, party2_id: session.user.id};
+    setSelected(updated);
+    fetchParlays();
     toast_("Confirmed! Authorize your card.");
   }
 
@@ -472,7 +406,7 @@ fetchBets();
       party2_payment_authorized: true,
       history: [...par.history, { action:`${session.user.email} authorized card — PARLAY LOCKED & FUNDED 🔒💳`, time:now() }]
     });
-    setShowCardAuth(false); fetchParlays(); setView("list");
+    fetchParlays(); setView("list");
     toast_("Parlay fully locked and funded! 🔒💳");
   }
 
@@ -487,13 +421,13 @@ fetchBets();
       newStatus = par.referee_email ? STATUS.AWAITING_REF : STATUS.SETTLING;
     }
     const logEntry = { action:`Leg ${legId+1}: ${winner==="party1"?session.user.email:par.party2_email} wins`, time:now() };
-    const finalLog = allSettled ? [...par.history, logEntry, { action:`All legs done — processing`, time:now() }] : [...par.history, logEntry];
+    const finalLog = allSettled ? [...par.history, logEntry, { action:`All legs done`, time:now() }] : [...par.history, logEntry];
     await dbUpdate("parlays", session.access_token, par.id, { legs:updatedLegs, overall_winner:overallWinner, status:newStatus, history:finalLog });
     if(allSettled && !par.referee_email && overallWinner !== "SPLIT") {
       const isP1Win = overallWinner !== par.party2_email;
       try {
         await fetch("/api/capture-payment", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ loserPaymentIntentId:isP1Win?par.party2_payment_intent_id:par.party1_payment_intent_id, winnerPaymentIntentId:isP1Win?par.party1_payment_intent_id:par.party2_payment_intent_id, amount:par.total_stake }) });
-        await dbUpdate("parlays", session.access_token, par.id, { status:STATUS.SETTLED, payment_status:"captured", history:[...finalLog,{action:`💳 ${overallWinner} wins $${par.total_stake}! Auto-processed.`,time:now()}] });
+        await dbUpdate("parlays", session.access_token, par.id, { status:STATUS.SETTLED, payment_status:"captured", history:[...finalLog,{action:`💳 ${overallWinner} wins $${par.total_stake}!`,time:now()}] });
         toast_(`Parlay settled! ${overallWinner} wins! 🏆💳`);
       } catch(e) { toast_("Payment error.", "err"); }
     } else if(allSettled && overallWinner === "SPLIT") {
@@ -502,7 +436,7 @@ fetchBets();
       await dbUpdate("parlays", session.access_token, par.id, { status:STATUS.SETTLED, history:[...finalLog,{action:`Split — holds released.`,time:now()}] });
       toast_("Split parlay — holds released.");
     } else if(allSettled && par.referee_email) {
-      await sendNotification(par.referee_email, `🏔 SnoVale — Referee action required`, `All legs of a parlay have been settled and need your confirmation.<br><br><strong>${overallWinner}</strong> wins $${par.total_stake}`, par.id);
+      await sendNotification(par.referee_email, `🏔 SnoVale — Referee action required`, `All legs settled. ${overallWinner} wins $${par.total_stake}. Log in to confirm.`, par.id);
       toast_("All legs done! Referee notified. ⚖️");
     } else {
       toast_(`Leg ${legId+1} settled.`);
@@ -555,6 +489,10 @@ fetchBets();
     </div>
   );
 
+  // Helper to get current bet from state
+  const currentBet = selected ? (bets.find(b=>b.id===selected.id) || selected) : null;
+  const currentPar = selected ? (parlays.find(p=>p.id===selected.id) || selected) : null;
+
   return (
     <div style={S.root}>
       <style>{css}</style>
@@ -595,8 +533,8 @@ fetchBets();
             </div>
             <button style={S.newBtn} onClick={()=>setView(tab==="bets"?"createBet":"createParlay")}>+ New {tab==="bets"?"Bet":"Parlay"}</button>
           </div>
-          {tab==="bets" && (filteredBets.length===0?<Empty label="No bets yet." />:<div style={S.list}>{filteredBets.map(b=><BetCard key={b.id} bet={b} onClick={()=>{setSelected(b);setView("detailBet");setShowCardAuth(false);}} />)}</div>)}
-          {tab==="parlays" && (filteredParlays.length===0?<Empty label="No parlays yet." />:<div style={S.list}>{filteredParlays.map(p=><ParlayCard key={p.id} par={p} onClick={()=>{setSelected(p);setView("detailParlay");setShowCardAuth(false);}} />)}</div>)}
+          {tab==="bets" && (filteredBets.length===0?<Empty label="No bets yet." />:<div style={S.list}>{filteredBets.map(b=><BetCard key={b.id} bet={b} myEmail={myEmail} onClick={()=>{setSelected(b);setView("detailBet");}} />)}</div>)}
+          {tab==="parlays" && (filteredParlays.length===0?<Empty label="No parlays yet." />:<div style={S.list}>{filteredParlays.map(p=><ParlayCard key={p.id} par={p} myEmail={myEmail} onClick={()=>{setSelected(p);setView("detailParlay");}} />)}</div>)}
         </div>
       )}
 
@@ -613,10 +551,10 @@ fetchBets();
             </div>
             <div style={S.sectionDivider}>⚖️ Referee (Optional)</div>
             <div style={S.refBox}>
-              <div style={S.refInfo}>Neutral third party who confirms the outcome before payment captures.</div>
+              <div style={S.refInfo}>Neutral third party who confirms outcome before payment captures.</div>
               <F label="Referee Email"><input style={S.input} type="email" placeholder="referee@email.com" value={betForm.referee_email} onChange={e=>setBetForm({...betForm,referee_email:e.target.value})} /></F>
             </div>
-            <div style={S.note}>💳 After creating, you'll authorize a card hold. Opponent is notified by email. 4% SnoVale fee on settlement.</div>
+            <div style={S.note}>💳 Both parties authorize a card hold. Loser charged automatically. 4% fee.</div>
             <button style={S.subBtn} onClick={createBet}>Create Bet & Authorize Card →</button>
           </div>
         </div>
@@ -656,13 +594,15 @@ fetchBets();
         </div>
       )}
 
-      {view==="detailBet" && selected && (()=>{
-        const bet = bets.find(b=>b.id===selected.id)||selected;
+      {view==="detailBet" && currentBet && (()=>{
+        const bet = currentBet;
         const isParty1 = bet.party1_id===session.user.id;
         const isParty2 = myEmail===bet.party2_email?.toLowerCase();
         const isRef = myEmail===bet.referee_email?.toLowerCase();
+        const needsP1Auth = bet.status===STATUS.AWAITING_P1_AUTH && isParty1;
+        const needsP2Auth = bet.status===STATUS.AWAITING_P2_AUTH && isParty2;
         return (
-          <div style={S.page}><Back onClick={()=>{setView("list");setShowCardAuth(false);}} />
+          <div style={S.page}><Back onClick={()=>setView("list")} />
             <div style={S.card}>
               <DHeader id={bet.id} cat={bet.category} status={bet.status} />
               {bet.referee_email&&<div style={S.refBadge}>⚖️ Refereed by {bet.referee_email}</div>}
@@ -676,13 +616,12 @@ fetchBets();
                 </div>
                 <div style={S.vsCirc}>VS</div>
                 <div style={{...S.pBox,...(bet.winner===bet.party2_email?S.pWin:{})}}>
-                  <div style={S.pName}>{bet.party2_email}</div>
+                  <div style={S.pName}>{isParty2?"You":bet.party2_email}</div>
                   <div style={S.pRole}>{bet.party2_id?"Confirmed":"⏳ Pending"}</div>
                   <div style={{fontSize:11,color:bet.party2_payment_authorized?T.green:T.textDim,marginTop:4}}>{bet.party2_payment_authorized?"💳 Authorized":"💳 Pending"}</div>
                   {bet.winner===bet.party2_email&&<div style={S.wBdg}>🏆 Winner</div>}
                 </div>
               </div>
-
               <Sec title="Details">
                 <Row k="Description" v={bet.description}/>
                 {bet.terms&&<Row k="Terms" v={bet.terms}/>}
@@ -691,36 +630,59 @@ fetchBets();
                 {bet.payment_status&&<Row k="Payment" v={bet.payment_status==="captured"?"✅ Captured":"⏳ Processing"}/>}
               </Sec>
 
-              {bet.status===STATUS.AWAITING_P1_AUTH&&isParty1&&!showCardAuth&&<ABox color={T.blue}><div style={S.aTitle}>💳 Authorize Your Card</div><div style={S.aSub}>Hold ${bet.amount} to lock in the bet. Only charged if you lose.</div><button style={S.okBtn} onClick={()=>setShowCardAuth(true)}>Enter Card Details →</button></ABox>}
-              {bet.status===STATUS.AWAITING_P1_AUTH&&isParty1&&showCardAuth&&<CardAuthForm bet={bet} session={session} role="party1" onSuccess={(pid)=>handleP1CardAuth(bet,pid)} onCancel={()=>setShowCardAuth(false)} />}
-              {bet.status===STATUS.AWAITING_P1_AUTH&&!isParty1&&<ABox color={T.blue}><div style={S.aTitle}>⏳ Awaiting creator's card</div></ABox>}
+              {needsP1Auth && <CardAuthForm bet={bet} session={session} role="party1" onSuccess={(pid)=>handleP1CardAuth(bet,pid)} onCancel={()=>setView("list")} />}
+              {bet.status===STATUS.AWAITING_P1_AUTH&&!isParty1&&<ABox color={T.blue}><div style={S.aTitle}>⏳ Awaiting creator's card authorization</div></ABox>}
 
-              {bet.status===STATUS.PENDING&&isParty2&&<ABox color={T.orange}><div style={S.aTitle}>🎯 You've been challenged!</div><div style={S.aSub}><strong>{bet.description}</strong> · ${bet.amount} stake</div><div style={S.aSub}>Confirm and authorize your card to lock the bet in. You're only charged if you lose.</div><button style={S.okBtn} onClick={()=>confirmBet(bet)}>Accept & Enter Card →</button></ABox>}
-              {bet.status===STATUS.PENDING&&isParty2&&<CardAuthForm bet={bet} session={session} role="party2" onSuccess={(pid)=>handleP2CardAuth(bet,pid)} onCancel={()=>setShowCardAuth(false)} />}
-              {bet.status===STATUS.PENDING&&isParty1&&<ABox color={T.orange}><div style={S.aTitle}>⏳ Waiting for {bet.party2_email}</div><div style={S.aSub}>Your card is authorized. They've been emailed. Waiting for them to confirm and authorize their card.</div></ABox>}
-              {bet.status===STATUS.AWAITING_P2_AUTH&&!isParty2&&<ABox color={T.blue}><div style={S.aTitle}>💳 Opponent authorizing card</div></ABox>}
+              {bet.status===STATUS.PENDING&&isParty2&&(
+                <ABox color={T.orange}>
+                  <div style={S.aTitle}>🎯 You've been challenged!</div>
+                  <div style={S.aSub}><strong>{bet.description}</strong> · ${bet.amount} stake</div>
+                  <div style={S.aSub}>Accept and authorize your card. You're only charged if you lose.</div>
+                  <button style={S.okBtn} onClick={()=>confirmBet(bet)}>Accept & Authorize Card →</button>
+                </ABox>
+              )}
+              {bet.status===STATUS.PENDING&&isParty1&&<ABox color={T.orange}><div style={S.aTitle}>⏳ Waiting for {bet.party2_email}</div><div style={S.aSub}>Your card is authorized. Waiting for opponent to confirm and authorize.</div></ABox>}
 
-              {bet.status===STATUS.ACTIVE&&(isParty1||isParty2)&&<ABox color={T.green}><div style={S.aTitle}>🔒 Bet Funded — Submit Outcome</div><div style={S.aSub}>Both cards authorized. Loser charged automatically on settlement.</div>{bet.referee_email&&<div style={S.aSub}>⚖️ Referee confirms before payment captures.</div>}<select style={S.input} value={winnerSel} onChange={e=>setWinnerSel(e.target.value)}><option value="">— Select Winner —</option><option value="party1">{isParty1?"You":bet.party2_email}</option><option value="party2">{bet.party2_email}</option></select><div style={{display:"flex",gap:10}}><button style={S.okBtn} onClick={()=>submitOutcome(bet)}>Submit Outcome ✅</button><button style={S.badBtn} onClick={()=>disputeBet(bet)}>Dispute ⚠️</button></div></ABox>}
+              {needsP2Auth && <CardAuthForm bet={bet} session={session} role="party2" onSuccess={(pid)=>handleP2CardAuth(bet,pid)} onCancel={()=>setView("list")} />}
+              {bet.status===STATUS.AWAITING_P2_AUTH&&!isParty2&&<ABox color={T.blue}><div style={S.aTitle}>💳 Opponent authorizing card...</div></ABox>}
 
-              {bet.status===STATUS.AWAITING_REF&&isRef&&<ABox color={T.purple}><div style={S.aTitle}>⚖️ Confirm & Trigger Payment</div><div style={S.aSub}>Submitted: <strong style={{color:T.orange}}>{bet.winner}</strong> wins ${bet.amount}</div><div style={{display:"flex",gap:10}}><button style={S.okBtn} onClick={()=>refereeConfirm(bet)}>Confirm ✅</button><button style={S.badBtn} onClick={()=>refereeOverride(bet)}>Override ⚖️</button></div></ABox>}
+              {bet.status===STATUS.ACTIVE&&(isParty1||isParty2)&&(
+                <ABox color={T.green}>
+                  <div style={S.aTitle}>🔒 Bet Funded — Submit Outcome</div>
+                  <div style={S.aSub}>Both cards authorized. Loser charged automatically.</div>
+                  {bet.referee_email&&<div style={S.aSub}>⚖️ Referee confirms before payment captures.</div>}
+                  <select style={S.input} value={winnerSel} onChange={e=>setWinnerSel(e.target.value)}>
+                    <option value="">— Select Winner —</option>
+                    <option value="party1">{isParty1?"You":bet.party2_email}</option>
+                    <option value="party2">{isParty2?"You":bet.party2_email}</option>
+                  </select>
+                  <div style={{display:"flex",gap:10}}>
+                    <button style={S.okBtn} onClick={()=>submitOutcome(bet)}>Submit Outcome ✅</button>
+                    <button style={S.badBtn} onClick={()=>disputeBet(bet)}>Dispute ⚠️</button>
+                  </div>
+                </ABox>
+              )}
+              {bet.status===STATUS.AWAITING_REF&&isRef&&<ABox color={T.purple}><div style={S.aTitle}>⚖️ Confirm & Trigger Payment</div><div style={S.aSub}><strong style={{color:T.orange}}>{bet.winner}</strong> wins ${bet.amount}</div><div style={{display:"flex",gap:10}}><button style={S.okBtn} onClick={()=>refereeConfirm(bet)}>Confirm ✅</button><button style={S.badBtn} onClick={()=>refereeOverride(bet)}>Override ⚖️</button></div></ABox>}
               {bet.status===STATUS.AWAITING_REF&&!isRef&&<ABox color={T.purple}><div style={S.aTitle}>⚖️ Awaiting Referee</div><div style={S.aSub}>{bet.referee_email} has been notified.</div></ABox>}
               {bet.status===STATUS.SETTLING&&<ABox color={T.orange}><div style={S.aTitle}>⚡ Processing Payment...</div></ABox>}
-              {bet.status===STATUS.SETTLED&&<ABox color={T.green}><div style={S.aTitle}>✅ Settled</div><div style={S.aSub}>{bet.winner} wins ${bet.amount}! Both parties notified by email. 💳</div></ABox>}
-              {bet.status===STATUS.DISPUTED&&<ABox color={T.red}><div style={S.aTitle}>⚠️ Disputed — Holds Released</div><div style={S.aSub}>All card holds released. Resolve manually.</div></ABox>}
+              {bet.status===STATUS.SETTLED&&<ABox color={T.green}><div style={S.aTitle}>✅ Settled</div><div style={S.aSub}>{bet.winner} wins ${bet.amount}! 💳 Auto-processed.</div></ABox>}
+              {bet.status===STATUS.DISPUTED&&<ABox color={T.red}><div style={S.aTitle}>⚠️ Disputed — Holds Released</div><div style={S.aSub}>Resolve manually.</div></ABox>}
               <Log history={bet.history}/>
             </div>
           </div>
         );
       })()}
 
-      {view==="detailParlay" && selected && (()=>{
-        const par = parlays.find(p=>p.id===selected.id)||selected;
+      {view==="detailParlay" && currentPar && (()=>{
+        const par = currentPar;
         const isParty1 = par.party1_id===session.user.id;
         const isParty2 = myEmail===par.party2_email?.toLowerCase();
         const isRef = myEmail===par.referee_email?.toLowerCase();
+        const needsP1Auth = par.status===STATUS.AWAITING_P1_AUTH && isParty1;
+        const needsP2Auth = par.status===STATUS.AWAITING_P2_AUTH && isParty2;
         const sc = par.legs.filter(l=>l.settled).length;
         return (
-          <div style={S.page}><Back onClick={()=>{setView("list");setShowCardAuth(false);}} />
+          <div style={S.page}><Back onClick={()=>setView("list")} />
             <div style={S.card}>
               <DHeader id={par.id} cat={`🔗 ${par.legs.length}-Leg Parlay`} status={par.status}/>
               {par.referee_email&&<div style={S.refBadge}>⚖️ Refereed by {par.referee_email}</div>}
@@ -734,7 +696,7 @@ fetchBets();
                 </div>
                 <div style={S.vsCirc}>VS</div>
                 <div style={{...S.pBox,...(par.overall_winner===par.party2_email?S.pWin:{})}}>
-                  <div style={S.pName}>{par.party2_email}</div>
+                  <div style={S.pName}>{isParty2?"You":par.party2_email}</div>
                   <div style={S.pRole}>{par.party2_id?"Confirmed":"⏳ Pending"}</div>
                   <div style={{fontSize:11,color:par.party2_payment_authorized?T.green:T.textDim,marginTop:4}}>{par.party2_payment_authorized?"💳 Authorized":"💳 Pending"}</div>
                 </div>
@@ -744,19 +706,19 @@ fetchBets();
                   <div key={leg.id} style={{...S.legDetail,borderColor:leg.settled?T.border:T.orange}}>
                     <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}>
                       <span style={{fontSize:12,color:T.orange,fontWeight:"bold"}}>Leg {i+1} — {leg.category}</span>
-                      {leg.settled?<span style={{...S.badge,background:T.green}}>✅ {leg.winner==="party1"?(isParty1?"You":session.user.email):par.party2_email}</span>:<span style={{...S.badge,background:T.textMuted}}>Pending</span>}
+                      {leg.settled?<span style={{...S.badge,background:T.green}}>✅ {leg.winner==="party1"?(isParty1?"You":par.party2_email):(isParty2?"You":par.party2_email)}</span>:<span style={{...S.badge,background:T.textMuted}}>Pending</span>}
                     </div>
                     <div style={{fontSize:13,color:T.textDim,fontStyle:"italic"}}>{leg.description}</div>
                     {par.status===STATUS.ACTIVE&&!leg.settled&&(isParty1||isParty2)&&<LegSettler leg={leg} par={par} onSettle={(id,w)=>settleLeg(par,id,w)}/>}
                   </div>
                 ))}
               </Sec>
-              {par.status===STATUS.AWAITING_P1_AUTH&&isParty1&&!showCardAuth&&<ABox color={T.blue}><div style={S.aTitle}>💳 Authorize Your Card</div><div style={S.aSub}>Hold ${par.total_stake} to lock in the parlay.</div><button style={S.okBtn} onClick={()=>setShowCardAuth(true)}>Enter Card Details →</button></ABox>}
-              {par.status===STATUS.AWAITING_P1_AUTH&&isParty1&&showCardAuth&&<CardAuthForm bet={par} session={session} role="party1" onSuccess={(pid)=>handleP1ParlayCardAuth(par,pid)} onCancel={()=>setShowCardAuth(false)} />}
+              {needsP1Auth&&<CardAuthForm bet={par} session={session} role="party1" onSuccess={(pid)=>handleP1ParlayCardAuth(par,pid)} onCancel={()=>setView("list")} />}
               {par.status===STATUS.AWAITING_P1_AUTH&&!isParty1&&<ABox color={T.blue}><div style={S.aTitle}>⏳ Creator authorizing card</div></ABox>}
-              {par.status===STATUS.PENDING&&isParty2&&!showCardAuth&&<ABox color={T.orange}><div style={S.aTitle}>🔗 You've been challenged to a Parlay!</div><div style={S.aSub}>{par.name} · ${par.total_stake} stake · {par.legs.length} legs</div><button style={S.okBtn} onClick={()=>confirmParlay(par)}>Accept & Enter Card →</button></ABox>}
-              {par.status===STATUS.PENDING&&isParty2&&showCardAuth&&<CardAuthForm bet={par} session={session} role="party2" onSuccess={(pid)=>handleP2ParlayCardAuth(par,pid)} onCancel={()=>setShowCardAuth(false)} />}
-              {par.status===STATUS.PENDING&&isParty1&&<ABox color={T.orange}><div style={S.aTitle}>⏳ Waiting for {par.party2_email}</div><div style={S.aSub}>They've been emailed. Waiting for them to confirm and authorize their card.</div></ABox>}
+              {par.status===STATUS.PENDING&&isParty2&&<ABox color={T.orange}><div style={S.aTitle}>🔗 You've been challenged to a Parlay!</div><div style={S.aSub}>{par.name} · ${par.total_stake} · {par.legs.length} legs</div><button style={S.okBtn} onClick={()=>confirmParlay(par)}>Accept & Authorize Card →</button></ABox>}
+              {par.status===STATUS.PENDING&&isParty1&&<ABox color={T.orange}><div style={S.aTitle}>⏳ Waiting for {par.party2_email}</div></ABox>}
+              {needsP2Auth&&<CardAuthForm bet={par} session={session} role="party2" onSuccess={(pid)=>handleP2ParlayCardAuth(par,pid)} onCancel={()=>setView("list")} />}
+              {par.status===STATUS.AWAITING_P2_AUTH&&!isParty2&&<ABox color={T.blue}><div style={S.aTitle}>💳 Opponent authorizing card...</div></ABox>}
               {par.status===STATUS.ACTIVE&&sc<par.legs.length&&(isParty1||isParty2)&&<div style={{textAlign:"right",marginTop:12}}><button style={S.badBtn} onClick={()=>disputeParlay(par)}>Flag Dispute ⚠️</button></div>}
               {par.status===STATUS.AWAITING_REF&&isRef&&<ABox color={T.purple}><div style={S.aTitle}>⚖️ Confirm & Capture</div><div style={S.aSub}>{par.overall_winner} wins ${par.total_stake}</div><button style={S.okBtn} onClick={()=>refereeConfirmParlay(par)}>Confirm ✅</button></ABox>}
               {par.status===STATUS.AWAITING_REF&&!isRef&&<ABox color={T.purple}><div style={S.aTitle}>⚖️ Awaiting Referee</div></ABox>}
@@ -784,22 +746,24 @@ function LegSettler({leg,par,onSettle}){
   );
 }
 
-function BetCard({bet,onClick}){
+function BetCard({bet,myEmail,onClick}){
+  const isParty2 = myEmail===bet.party2_email?.toLowerCase();
   return(
     <div style={S.betCard} className="hov" onClick={onClick}>
       <div style={S.cTop}><span style={S.idTag}>{bet.id}{bet.referee_email&&<span style={{color:"#5b2d8a",marginLeft:6}}>⚖️</span>}</span><Bdg status={bet.status}/></div>
-      <div style={S.cMid}><div style={S.pts}>You <span style={S.vs}>VS</span> {bet.party2_email}</div><div style={S.amt}>${bet.amount}</div></div>
+      <div style={S.cMid}><div style={S.pts}>{isParty2?bet.party2_email:"You"} <span style={S.vs}>VS</span> {isParty2?"You":bet.party2_email}</div><div style={S.amt}>${bet.amount}</div></div>
       <div style={S.cBot}><span style={S.cat}>{bet.category}</span><span style={S.desc}>{bet.description}</span></div>
     </div>
   );
 }
 
-function ParlayCard({par,onClick}){
+function ParlayCard({par,myEmail,onClick}){
   const sc=par.legs.filter(l=>l.settled).length;
+  const isParty2 = myEmail===par.party2_email?.toLowerCase();
   return(
     <div style={S.betCard} className="hov" onClick={onClick}>
       <div style={S.cTop}><span style={S.idTag}>{par.id}{par.referee_email&&<span style={{color:"#5b2d8a",marginLeft:6}}>⚖️</span>} <span style={{color:"#e8751a"}}>· {par.legs.length} legs</span></span><Bdg status={par.status}/></div>
-      <div style={S.cMid}><div style={S.pts}>You <span style={S.vs}>VS</span> {par.party2_email}</div><div style={S.amt}>${par.total_stake}</div></div>
+      <div style={S.cMid}><div style={S.pts}>{isParty2?par.party2_email:"You"} <span style={S.vs}>VS</span> {isParty2?"You":par.party2_email}</div><div style={S.amt}>${par.total_stake}</div></div>
       <div style={S.cBot}><span style={S.cat}>🔗 Parlay</span><span style={S.desc}>{par.name} · {sc}/{par.legs.length} settled</span></div>
     </div>
   );
@@ -895,7 +859,6 @@ const S={
   badBtn:{padding:"11px",background:"#8b2525",color:"#fff",border:"none",borderRadius:8,fontSize:13,fontWeight:"bold",cursor:"pointer"},
   paymentForm:{background:"#1a1a2e",border:"1px solid #3a424d",borderRadius:10,padding:"20px",marginTop:18,display:"flex",flexDirection:"column",gap:12},
   cardBox:{background:"#0d0d1a",border:"1px solid #3a424d",borderRadius:8,padding:"16px"},
-  cardEl:{minHeight:20},
   legDetail:{background:"#1c1f23",border:"1px solid #3a424d",borderRadius:10,padding:"14px",marginBottom:10},
   logRow:{display:"flex",gap:10,padding:"7px 0",borderBottom:"1px solid #2e343c"},
   logDot:{color:"#e8751a",fontSize:8,marginTop:4,flexShrink:0},
