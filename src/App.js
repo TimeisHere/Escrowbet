@@ -65,52 +65,78 @@ function fmt(iso){ return new Date(iso).toLocaleString(); }
 function now(){ return new Date().toISOString(); }
 
 function CardAuthForm({ bet, session, role, onSuccess, onCancel }) {
- const cardRef = useRef(null);
-const cardElementRef = useRef(null);
-const stripeRef = useRef(null);
+  const cardRef = useRef(null);
+  const stripeRef = useRef(null);
+  const cardElementRef = useRef(null);
   const [cardReady, setCardReady] = useState(false);
   const [processing, setProcessing] = useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => {
-    if(!window.Stripe || !cardRef.current) return;
-   const stripe = stripeRef.current;
-const stripe = stripeRef.current;
-    const elements = stripe.elements();
-    const card = elements.create("card", {
-      style: {
-        base: {
-          color:"#d4dbe3", fontFamily:"Trebuchet MS, sans-serif",
-          fontSize:"16px", "::placeholder":{ color:"#6b7a8a" }
-        },
-        invalid: { color:"#e8751a" }
+    let mounted = true;
+    function init() {
+      if(!window.Stripe || !cardRef.current) {
+        setTimeout(init, 100);
+        return;
       }
-    });
-    card.mount(cardRef.current);
-    card.on("ready", () => setCardReady(true));
-    card.on("change", e => { if(e.error) setError(e.error.message); else setError(""); });
-    cardElementRef.current = card;
-    return () => { try { card.destroy(); } catch(e) {} };
+      if(!mounted) return;
+      const stripe = window.Stripe(STRIPE_PK);
+      stripeRef.current = stripe;
+      const elements = stripe.elements();
+      const card = elements.create("card", {
+        style: {
+          base: {
+            color:"#d4dbe3",
+            fontFamily:"Trebuchet MS, sans-serif",
+            fontSize:"16px",
+            "::placeholder":{ color:"#6b7a8a" }
+          },
+          invalid: { color:"#e8751a" }
+        }
+      });
+      card.mount(cardRef.current);
+      card.on("ready", () => { if(mounted) setCardReady(true); });
+      card.on("change", e => { if(mounted) setError(e.error ? e.error.message : ""); });
+      cardElementRef.current = card;
+    }
+    init();
+    return () => {
+      mounted = false;
+      try { if(cardElementRef.current) cardElementRef.current.destroy(); } catch(e) {}
+    };
   }, []);
 
   async function handleAuthorize() {
-    if(!cardElementRef.current) return;
+    if(!cardElementRef.current || !stripeRef.current) return;
     setProcessing(true); setError("");
     try {
       const amount = bet.amount || bet.total_stake;
       const r = await fetch("/api/authorize-card", {
-        method:"POST", headers:{"Content-Type":"application/json"},
-        body: JSON.stringify({ amount, betId:bet.id, email:session.user.email, role, description:bet.description||bet.name })
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({
+          amount,
+          betId: bet.id,
+          email: session.user.email,
+          role,
+          description: bet.description || bet.name
+        })
       });
       const { clientSecret, paymentIntentId, error:apiError } = await r.json();
       if(apiError) { setError(apiError); setProcessing(false); return; }
-      const stripe = window.Stripe(STRIPE_PK);
-      const { error:stripeError, paymentIntent } = await stripe.confirmCardPayment(clientSecret, {
-        payment_method: { card: cardElementRef.current, billing_details: { email: session.user.email } }
+      const { error:stripeError, paymentIntent } = await stripeRef.current.confirmCardPayment(clientSecret, {
+        payment_method: {
+          card: cardElementRef.current,
+          billing_details: { email: session.user.email }
+        }
       });
       if(stripeError) { setError(stripeError.message); setProcessing(false); return; }
-      if(paymentIntent.status === "requires_capture") onSuccess(paymentIntentId);
-      else { setError("Authorization incomplete. Please try again."); setProcessing(false); }
+      if(paymentIntent.status === "requires_capture") {
+        onSuccess(paymentIntentId);
+      } else {
+        setError(`Unexpected status: ${paymentIntent.status}. Please try again.`);
+        setProcessing(false);
+      }
     } catch(e) { setError(e.message); setProcessing(false); }
   }
 
@@ -125,12 +151,17 @@ const stripe = stripeRef.current;
       </div>
       {error && <div style={{color:T.red, fontSize:13, padding:"8px 0"}}>{error}</div>}
       <div style={{display:"flex", gap:10}}>
-        <button style={{...S.okBtn, opacity: (!cardReady||processing)?0.6:1}} onClick={handleAuthorize} disabled={!cardReady||processing}>
+        <button
+          style={{...S.okBtn, opacity:(!cardReady||processing)?0.6:1}}
+          onClick={handleAuthorize}
+          disabled={!cardReady||processing}>
           {processing ? "⏳ Authorizing..." : `Authorize $${amount} Hold 🔒`}
         </button>
         <button style={S.badBtn} onClick={onCancel} disabled={processing}>Cancel</button>
       </div>
-      <div style={{fontSize:11, color:T.textMuted, marginTop:4}}>🔒 Powered by Stripe. Card details never touch SnoVale servers.</div>
+      <div style={{fontSize:11, color:T.textMuted, marginTop:4}}>
+        🔒 Powered by Stripe. Card details never touch SnoVale servers.
+      </div>
     </div>
   );
 }
