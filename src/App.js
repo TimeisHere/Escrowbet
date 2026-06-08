@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 
 const SUPA_URL = "https://ciwgianwiltffwdeigpo.supabase.co";
 const SUPA_KEY = "sb_publishable_De_LCVKbIza3eGBtiILLjQ_hM3LYb9F";
-const STRIPE_PK = "pk_test_51Tfg23JuwRivwQBWk1flqWuYAtNgAQaE1F7SHJI3vbuApmAnSHAtqoKxTwEqGmDKok7TnTToWd0I0XthP0xoYhkZ00xzoUoCkN";
+const STRIPE_PK = "pk_test_51Tfg1kJvqjWYKBEDb35hYcorxBX2WFBttLBCYg1uzBQMmrGJxiSCdn9aCpX59yKJcpajrgZJupxucYhUSEGRfIJS000lUzMGXr";
 
 const h = { "Content-Type": "application/json", "apikey": SUPA_KEY, "Authorization": `Bearer ${SUPA_KEY}` };
 
