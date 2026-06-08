@@ -180,7 +180,7 @@ export default function App() {
   const [selected, setSelected] = useState(null);
   const [filter, setFilter] = useState("all");
   const [toast, setToast] = useState(null);
-  const [showCardAuth, setShowCardAuth] = useState(false);
+  const [showCardAuth, setShowCardAuth] = useState(true);
   const blankBet = { party2_email:"", amount:"", category:CATEGORIES[0], description:"", terms:"", referee_email:"" };
   const [betForm, setBetForm] = useState(blankBet);
   const blankParlay = { name:"", party2_email:"", totalStake:"", referee_email:"" };
