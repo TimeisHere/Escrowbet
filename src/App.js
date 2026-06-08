@@ -293,9 +293,9 @@ export default function App() {
       status: STATUS.AWAITING_P2_AUTH, party2_id: session.user.id,
       history: [...bet.history, { action:`${session.user.email} confirmed — authorizing card`, time:now() }]
     });
-    fetchBets();
     setShowCardAuth(true);
-    toast_("Confirmed! Now authorize your card.");
+toast_("Confirmed! Now authorize your card.");
+fetchBets();
   }
 
   async function handleP2CardAuth(bet, paymentIntentId) {
