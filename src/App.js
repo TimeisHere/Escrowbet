@@ -52,13 +52,13 @@ const T = {
 };
 
 const CATEGORIES = [
-  { id:"golf",    label:"Golf",       icon:"⛳" },
-  { id:"sports",  label:"Sports",     icon:"🏀" },
-  { id:"gaming",  label:"Gaming",     icon:"🎮" },
-  { id:"darts",   label:"Darts",      icon:"🎯" },
-  { id:"pool",    label:"Pool",       icon:"🎱" },
-  { id:"cards",   label:"Cards",      icon:"🃏" },
-  { id:"other",   label:"Other",      icon:"🏌️" },
+  { id:"golf",    label:"Golf"   },
+  { id:"sports",  label:"Sports" },
+  { id:"gaming",  label:"Gaming" },
+  { id:"darts",   label:"Darts"  },
+  { id:"pool",    label:"Pool"   },
+  { id:"cards",   label:"Cards"  },
+  { id:"other",   label:"Other"  },
 ];
 const CAT_DISPLAY = (id) => {
   const c = CATEGORIES.find(c=>c.id===id);
@@ -83,9 +83,19 @@ function fmt(iso){ return new Date(iso).toLocaleString(); }
 function now(){ return new Date().toISOString(); }
 
 // ─── Category Picker ──────────────────────────────────────────────────────────
+const CAT_ICONS = {
+  golf:    "ti-golf",
+  sports:  "ti-trophy",
+  gaming:  "ti-device-gamepad-2",
+  darts:   "ti-target",
+  pool:    "ti-circle-dot",
+  cards:   "ti-cards",
+  other:   "ti-dots",
+};
+
 function CategoryPicker({ value, onChange }) {
   return (
-    <div style={S.catGrid}>
+    <div style={S.pillRow}>
       {CATEGORIES.map(cat => {
         const active = value === cat.id;
         return (
@@ -97,10 +107,13 @@ function CategoryPicker({ value, onChange }) {
               ...S.catPill,
               ...(active ? S.catPillOn : {}),
             }}
-            className={active ? "catActive" : "catPill"}
           >
-            <span style={S.catIcon}>{cat.icon}</span>
-            <span style={S.catLabel}>{cat.label}</span>
+            <i
+              className={`ti ${CAT_ICONS[cat.id]}`}
+              aria-hidden="true"
+              style={{ fontSize: 15, color: active ? "#e8751a" : "#6b7a8a" }}
+            />
+            <span style={{ color: active ? "#e8751a" : "#6b7a8a" }}>{cat.label}</span>
           </button>
         );
       })}
@@ -951,22 +964,17 @@ const S={
   logA:{fontSize:13,color:"#d4dbe3",marginBottom:2},
   logT:{fontSize:11,color:"#404d5c",fontFamily:"monospace"},
   // Category picker
-  catGrid:{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8,marginTop:2},
-  catPill:{display:"flex",flexDirection:"column",alignItems:"center",gap:4,padding:"10px 6px",background:"#1c1f23",border:"1px solid #3a424d",borderRadius:10,cursor:"pointer",transition:"all 0.15s",outline:"none"},
-  catPillOn:{background:"#7a3c0d",border:"1px solid #e8751a"},
-  catIcon:{fontSize:22,lineHeight:1},
-  catLabel:{fontSize:10,color:"#6b7a8a",letterSpacing:0.5,textTransform:"uppercase"},
+  pillRow:{display:"flex",flexWrap:"wrap",gap:8,marginTop:4},
+  catPill:{display:"inline-flex",alignItems:"center",gap:7,padding:"7px 13px",background:"#1c1f23",border:"1px solid #3a424d",borderRadius:6,cursor:"pointer",outline:"none",fontFamily:"'Trebuchet MS',sans-serif",fontSize:12,letterSpacing:"0.3px",transition:"border-color 0.12s,color 0.12s,background 0.12s",whiteSpace:"nowrap"},
+  catPillOn:{borderColor:"#e8751a",background:"#1e1208"},
 };
 
 const css=`
+  @import url('https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.19.0/dist/tabler-icons.min.css');
   *{box-sizing:border-box;}
   .hov:hover{border-color:#e8751a!important;}
   input:focus,select:focus,textarea:focus{border-color:#e8751a!important;}
-  .catPill:hover{border-color:#e8751a!important;background:#2e343c!important;}
-  .catActive{border-color:#e8751a!important;background:#7a3c0d!important;}
-  .catActive .catLabel,.catPill:hover .catLabel{color:#e8751a!important;}
   @media(max-width:520px){
     div[style*="grid-template-columns: 1fr 1fr"]{grid-template-columns:1fr!important;}
-    .catGrid{grid-template-columns:repeat(4,1fr)!important;}
   }
 `;
