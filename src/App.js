@@ -609,14 +609,14 @@ export default function App() {
               <Pot amount={`$${bet.amount}`} label="Pot" sub="Both cards authorized · Auto settlement" />
               <div style={S.parties}>
                 <div style={{...S.pBox,...(bet.winner===session.user.email&&isParty1?S.pWin:{})}}>
-                  <div style={S.pName}>{isParty1?"You":bet.party2_email}</div>
+                 <div style={S.pName}>{isParty1?session.user.email:bet.party2_email}</div>
                   <div style={S.pRole}>Creator</div>
                   <div style={{fontSize:11,color:bet.party1_payment_authorized?T.green:T.textDim,marginTop:4}}>{bet.party1_payment_authorized?"💳 Authorized":"💳 Pending"}</div>
                   {bet.winner===session.user.email&&isParty1&&<div style={S.wBdg}>🏆 Winner</div>}
                 </div>
                 <div style={S.vsCirc}>VS</div>
                 <div style={{...S.pBox,...(bet.winner===bet.party2_email?S.pWin:{})}}>
-                  <div style={S.pName}>{isParty2?"You":bet.party2_email}</div>
+                 <div style={S.pName}>{isParty2?session.user.email:bet.party2_email}</div>
                   <div style={S.pRole}>{bet.party2_id?"Confirmed":"⏳ Pending"}</div>
                   <div style={{fontSize:11,color:bet.party2_payment_authorized?T.green:T.textDim,marginTop:4}}>{bet.party2_payment_authorized?"💳 Authorized":"💳 Pending"}</div>
                   {bet.winner===bet.party2_email&&<div style={S.wBdg}>🏆 Winner</div>}
