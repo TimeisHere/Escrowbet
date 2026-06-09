@@ -751,7 +751,7 @@ function BetCard({bet,myEmail,onClick}){
   return(
     <div style={S.betCard} className="hov" onClick={onClick}>
       <div style={S.cTop}><span style={S.idTag}>{bet.id}{bet.referee_email&&<span style={{color:"#5b2d8a",marginLeft:6}}>⚖️</span>}</span><Bdg status={bet.status}/></div>
-      <div style={S.cMid}><div style={S.pts}>{isParty2?bet.party2_email:"You"} <span style={S.vs}>VS</span> {isParty2?"You":bet.party2_email}</div><div style={S.amt}>${bet.amount}</div></div>
+     {isParty2?bet.party2_email:myEmail} <span style={S.vs}>VS</span> {isParty2?myEmail:bet.party2_email}
       <div style={S.cBot}><span style={S.cat}>{bet.category}</span><span style={S.desc}>{bet.description}</span></div>
     </div>
   );
@@ -763,7 +763,7 @@ function ParlayCard({par,myEmail,onClick}){
   return(
     <div style={S.betCard} className="hov" onClick={onClick}>
       <div style={S.cTop}><span style={S.idTag}>{par.id}{par.referee_email&&<span style={{color:"#5b2d8a",marginLeft:6}}>⚖️</span>} <span style={{color:"#e8751a"}}>· {par.legs.length} legs</span></span><Bdg status={par.status}/></div>
-      <div style={S.cMid}><div style={S.pts}>{isParty2?par.party2_email:"You"} <span style={S.vs}>VS</span> {isParty2?"You":par.party2_email}</div><div style={S.amt}>${par.total_stake}</div></div>
+      {isParty2?par.party2_email:myEmail} <span style={S.vs}>VS</span> {isParty2?myEmail:par.party2_email}
       <div style={S.cBot}><span style={S.cat}>🔗 Parlay</span><span style={S.desc}>{par.name} · {sc}/{par.legs.length} settled</span></div>
     </div>
   );
