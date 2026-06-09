@@ -753,7 +753,7 @@ const opponentDisplay = isParty2 ? myEmail : bet.party2_email;
   return(
     <div style={S.betCard} className="hov" onClick={onClick}>
       <div style={S.cTop}><span style={S.idTag}>{bet.id}{bet.referee_email&&<span style={{color:"#5b2d8a",marginLeft:6}}>⚖️</span>}</span><Bdg status={bet.status}/></div>
-   {bet.party1_email||bet.party2_email} <span style={S.vs}>VS</span> {myEmail===bet.party1_email?.toLowerCase()?bet.party2_email:bet.party1_email||myEmail}
+   {bet.party1_email||"Creator"} <span style={S.vs}>VS</span> {bet.party2_email}
       <div style={S.cBot}><span style={S.cat}>{bet.category}</span><span style={S.desc}>{bet.description}</span></div>
     </div>
   );
@@ -767,7 +767,7 @@ const opponentDisplay = isParty2 ? myEmail : bet.party2_email;
   return(
     <div style={S.betCard} className="hov" onClick={onClick}>
       <div style={S.cTop}><span style={S.idTag}>{par.id}{par.referee_email&&<span style={{color:"#5b2d8a",marginLeft:6}}>⚖️</span>} <span style={{color:"#e8751a"}}>· {par.legs.length} legs</span></span><Bdg status={par.status}/></div>
-    {par.party1_email||par.party2_email} <span style={S.vs}>VS</span> {myEmail===par.party1_email?.toLowerCase()?par.party2_email:par.party1_email||myEmail}
+   {par.party1_email||"Creator"} <span style={S.vs}>VS</span> {par.party2_email}
       <div style={S.cBot}><span style={S.cat}>🔗 Parlay</span><span style={S.desc}>{par.name} · {sc}/{par.legs.length} settled</span></div>
     </div>
   );
