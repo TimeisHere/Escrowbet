@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 
 const SUPA_URL = "https://ciwgianwiltffwdeigpo.supabase.co";
 const SUPA_KEY = "sb_publishable_De_LCVKbIza3eGBtiILLjQ_hM3LYb9F";
@@ -12,6 +12,12 @@ async function signUp(email, password) {
 }
 async function signIn(email, password) {
   const r = await fetch(`${SUPA_URL}/auth/v1/token?grant_type=password`, { method:"POST", headers:h, body:JSON.stringify({email,password}) });
+  return r.json();
+}
+async function refreshSession(refreshToken) {
+  const r = await fetch(`${SUPA_URL}/auth/v1/token?grant_type=refresh_token`, {
+    method:"POST", headers:h, body:JSON.stringify({ refresh_token: refreshToken })
+  });
   return r.json();
 }
 async function signOut(token) {
@@ -45,7 +51,20 @@ const T = {
   purple:"#5b2d8a",
 };
 
-const CATEGORIES = ["⛳ Golf","🎮 Video Game","🏀 Sports","🎯 Darts","🎱 Pool","🃏 Cards","🏌️ Other"];
+const CATEGORIES = [
+  { id:"golf",    label:"Golf",       icon:"⛳" },
+  { id:"sports",  label:"Sports",     icon:"🏀" },
+  { id:"gaming",  label:"Gaming",     icon:"🎮" },
+  { id:"darts",   label:"Darts",      icon:"🎯" },
+  { id:"pool",    label:"Pool",       icon:"🎱" },
+  { id:"cards",   label:"Cards",      icon:"🃏" },
+  { id:"other",   label:"Other",      icon:"🏌️" },
+];
+const CAT_DISPLAY = (id) => {
+  const c = CATEGORIES.find(c=>c.id===id);
+  return c ? `${c.icon} ${c.label}` : id;
+};
+
 const STATUS = {
   PENDING:"pending", AWAITING_P1_AUTH:"awaiting_p1_auth", AWAITING_P2_AUTH:"awaiting_p2_auth",
   ACTIVE:"active", AWAITING_REF:"awaiting_ref", SETTLING:"settling", SETTLED:"settled", DISPUTED:"disputed"
@@ -63,6 +82,33 @@ function uid(p="BET"){ return `${p}-${Math.random().toString(36).substr(2,6).toU
 function fmt(iso){ return new Date(iso).toLocaleString(); }
 function now(){ return new Date().toISOString(); }
 
+// ─── Category Picker ──────────────────────────────────────────────────────────
+function CategoryPicker({ value, onChange }) {
+  return (
+    <div style={S.catGrid}>
+      {CATEGORIES.map(cat => {
+        const active = value === cat.id;
+        return (
+          <button
+            key={cat.id}
+            type="button"
+            onClick={() => onChange(cat.id)}
+            style={{
+              ...S.catPill,
+              ...(active ? S.catPillOn : {}),
+            }}
+            className={active ? "catActive" : "catPill"}
+          >
+            <span style={S.catIcon}>{cat.icon}</span>
+            <span style={S.catLabel}>{cat.label}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+// ─── Card Auth Form ───────────────────────────────────────────────────────────
 function CardAuthForm({ bet, session, role, onSuccess, onCancel }) {
   const cardRef = useRef(null);
   const stripeRef = useRef(null);
@@ -138,6 +184,7 @@ function CardAuthForm({ bet, session, role, onSuccess, onCancel }) {
   );
 }
 
+// ─── App ──────────────────────────────────────────────────────────────────────
 export default function App() {
   const [session, setSession] = useState(null);
   const [authView, setAuthView] = useState("login");
@@ -152,18 +199,49 @@ export default function App() {
   const [selected, setSelected] = useState(null);
   const [filter, setFilter] = useState("all");
   const [toast, setToast] = useState(null);
-  const blankBet = { party2_email:"", amount:"", category:CATEGORIES[0], description:"", terms:"", referee_email:"" };
+  const blankBet = { party2_email:"", amount:"", category:"golf", description:"", terms:"", referee_email:"" };
   const [betForm, setBetForm] = useState(blankBet);
   const blankParlay = { name:"", party2_email:"", totalStake:"", referee_email:"" };
   const [parlayForm, setParlayForm] = useState(blankParlay);
-  const blankLeg = { description:"", category:CATEGORIES[0] };
+  const blankLeg = { description:"", category:"golf" };
   const [legs, setLegs] = useState([{...blankLeg}]);
   const [winnerSel, setWinnerSel] = useState("");
 
+  // ── Session init + auto-refresh ─────────────────────────────────────────────
+  const refreshTimerRef = useRef(null);
+
+  const scheduleRefresh = useCallback((sess) => {
+    if(refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
+    // Supabase tokens expire in 3600s; refresh at 55 min
+    const REFRESH_IN_MS = 55 * 60 * 1000;
+    refreshTimerRef.current = setTimeout(async () => {
+      try {
+        const d = await refreshSession(sess.refresh_token);
+        if(d.access_token) {
+          const next = { ...sess, access_token: d.access_token, refresh_token: d.refresh_token || sess.refresh_token };
+          localStorage.setItem("sb_session", JSON.stringify(next));
+          setSession(next);
+          scheduleRefresh(next);
+        } else {
+          // Token couldn't be refreshed — log out cleanly
+          localStorage.removeItem("sb_session");
+          setSession(null);
+        }
+      } catch(e) {
+        console.error("Session refresh failed:", e);
+      }
+    }, REFRESH_IN_MS);
+  }, []);
+
   useEffect(() => {
     const saved = localStorage.getItem("sb_session");
-    if(saved) setSession(JSON.parse(saved));
-  }, []);
+    if(saved) {
+      const sess = JSON.parse(saved);
+      setSession(sess);
+      scheduleRefresh(sess);
+    }
+    return () => { if(refreshTimerRef.current) clearTimeout(refreshTimerRef.current); };
+  }, [scheduleRefresh]);
 
   useEffect(() => { if(session) { fetchBets(); fetchParlays(); } }, [session]);
 
@@ -184,7 +262,11 @@ export default function App() {
     if(authView === "login") {
       const d = await signIn(email, password);
       if(d.error) { setAuthError(d.error.message || d.error); }
-      else { localStorage.setItem("sb_session", JSON.stringify(d)); setSession(d); }
+      else {
+        localStorage.setItem("sb_session", JSON.stringify(d));
+        setSession(d);
+        scheduleRefresh(d);
+      }
     } else {
       const d = await signUp(email, password);
       if(d.error) setAuthError(d.error.message || d.error);
@@ -194,6 +276,7 @@ export default function App() {
   }
 
   async function handleLogout() {
+    if(refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
     await signOut(session.access_token);
     localStorage.removeItem("sb_session");
     setSession(null); setBets([]); setParlays([]);
@@ -207,8 +290,8 @@ export default function App() {
       id: uid(), party1_id: session.user.id,
       party2_email: f.party2_email.toLowerCase(),
       referee_email: f.referee_email ? f.referee_email.toLowerCase() : null,
-      party1_email: session.user.email,      party2_id: null, amount: parseFloat(f.amount),
-      category: f.category, description: f.description, terms: f.terms,
+      party1_email: session.user.email, party2_id: null, amount: parseFloat(f.amount),
+      category: CAT_DISPLAY(f.category), description: f.description, terms: f.terms,
       status: STATUS.AWAITING_P1_AUTH, winner: null,
       payment_intent_id: null, payment_status: null,
       party1_payment_intent_id: null, party2_payment_intent_id: null,
@@ -353,10 +436,10 @@ export default function App() {
       id: uid("PAR"), party1_id: session.user.id,
       party2_email: f.party2_email.toLowerCase(),
       referee_email: f.referee_email ? f.referee_email.toLowerCase() : null,
-      party1_email: session.user.email,      party2_id: null,
+      party1_email: session.user.email, party2_id: null,
       name: f.name || `${session.user.email} vs ${f.party2_email} Parlay`,
       total_stake: parseFloat(f.totalStake),
-      legs: legs.map((l,i) => ({...l, id:i, winner:null, settled:false})),
+      legs: legs.map((l,i) => ({...l, category: CAT_DISPLAY(l.category), id:i, winner:null, settled:false})),
       status: STATUS.AWAITING_P1_AUTH, overall_winner: null,
       payment_intent_id: null, payment_status: null,
       party1_payment_intent_id: null, party2_payment_intent_id: null,
@@ -489,7 +572,6 @@ export default function App() {
     </div>
   );
 
-  // Helper to get current bet from state
   const currentBet = selected ? (bets.find(b=>b.id===selected.id) || selected) : null;
   const currentPar = selected ? (parlays.find(p=>p.id===selected.id) || selected) : null;
 
@@ -545,7 +627,12 @@ export default function App() {
               <F label="Your Email" full><input style={{...S.input,opacity:0.6}} value={myEmail} disabled /></F>
               <F label="Opponent Email *" full><input style={S.input} type="email" placeholder="opponent@email.com" value={betForm.party2_email} onChange={e=>setBetForm({...betForm,party2_email:e.target.value})} /></F>
               <F label="Stake ($) *"><input style={S.input} type="number" placeholder="0.00" value={betForm.amount} onChange={e=>setBetForm({...betForm,amount:e.target.value})} /></F>
-              <F label="Category"><select style={S.input} value={betForm.category} onChange={e=>setBetForm({...betForm,category:e.target.value})}>{CATEGORIES.map(c=><option key={c}>{c}</option>)}</select></F>
+            </div>
+            <F label="Category">
+              <CategoryPicker value={betForm.category} onChange={v=>setBetForm({...betForm,category:v})} />
+            </F>
+            <div style={{height:14}} />
+            <div style={S.g2}>
               <F label="What's the Bet? *" full><input style={S.input} placeholder="e.g. Back 9 lowest score wins" value={betForm.description} onChange={e=>setBetForm({...betForm,description:e.target.value})} /></F>
               <F label="Terms" full><textarea style={{...S.input,height:72,resize:"vertical"}} placeholder="Handicaps, rules..." value={betForm.terms} onChange={e=>setBetForm({...betForm,terms:e.target.value})} /></F>
             </div>
@@ -554,7 +641,7 @@ export default function App() {
               <div style={S.refInfo}>Neutral third party who confirms outcome before payment captures.</div>
               <F label="Referee Email"><input style={S.input} type="email" placeholder="referee@email.com" value={betForm.referee_email} onChange={e=>setBetForm({...betForm,referee_email:e.target.value})} /></F>
             </div>
-            <div style={S.note}>💳 Both parties authorize a card hold. Loser charged automatically. 4% fee.</div>
+            <div style={S.note}>💳 Both parties authorize a card hold. Loser is charged automatically — winner receives the full stake.</div>
             <button style={S.subBtn} onClick={createBet}>Create Bet & Authorize Card →</button>
           </div>
         </div>
@@ -578,17 +665,18 @@ export default function App() {
             <div style={S.legsHdr}><span style={{fontWeight:"bold",color:T.text}}>Legs ({legs.length})</span><button style={S.addLeg} onClick={()=>setLegs(p=>[...p,{...blankLeg}])}>+ Add Leg</button></div>
             {legs.map((leg,i)=>(
               <div key={i} style={S.legCard}>
-                <div style={{display:"flex",justifyContent:"space-between",marginBottom:10}}>
+                <div style={{display:"flex",justifyContent:"space-between",marginBottom:12}}>
                   <span style={{fontSize:12,color:T.orange,fontWeight:"bold"}}>Leg {i+1}</span>
                   {legs.length>2&&<button style={{background:"none",border:"none",color:T.textDim,cursor:"pointer"}} onClick={()=>setLegs(p=>p.filter((_,idx)=>idx!==i))}>✕</button>}
                 </div>
-                <div style={S.g2}>
-                  <F label="Category"><select style={S.input} value={leg.category} onChange={e=>setLegs(p=>p.map((l,idx)=>idx===i?{...l,category:e.target.value}:l))}>{CATEGORIES.map(c=><option key={c}>{c}</option>)}</select></F>
-                  <F label="Description *" full><input style={S.input} placeholder="e.g. Front 9 lowest score" value={leg.description} onChange={e=>setLegs(p=>p.map((l,idx)=>idx===i?{...l,description:e.target.value}:l))} /></F>
-                </div>
+                <F label="Category">
+                  <CategoryPicker value={leg.category} onChange={v=>setLegs(p=>p.map((l,idx)=>idx===i?{...l,category:v}:l))} />
+                </F>
+                <div style={{height:10}} />
+                <F label="Description *" full><input style={S.input} placeholder="e.g. Front 9 lowest score" value={leg.description} onChange={e=>setLegs(p=>p.map((l,idx)=>idx===i?{...l,description:e.target.value}:l))} /></F>
               </div>
             ))}
-            <div style={S.note}>💳 4% SnoVale fee on settlement.</div>
+            <div style={S.note}>💳 Loser is charged automatically — winner receives the full stake.</div>
             <button style={S.subBtn} onClick={createParlay}>Create Parlay & Authorize Card →</button>
           </div>
         </div>
@@ -609,14 +697,14 @@ export default function App() {
               <Pot amount={`$${bet.amount}`} label="Pot" sub="Both cards authorized · Auto settlement" />
               <div style={S.parties}>
                 <div style={{...S.pBox,...(bet.winner===session.user.email&&isParty1?S.pWin:{})}}>
-                 <div style={S.pName}>{isParty1?session.user.email:bet.party2_email}</div>
+                  <div style={S.pName}>{isParty1?session.user.email:bet.party2_email}</div>
                   <div style={S.pRole}>Creator</div>
                   <div style={{fontSize:11,color:bet.party1_payment_authorized?T.green:T.textDim,marginTop:4}}>{bet.party1_payment_authorized?"💳 Authorized":"💳 Pending"}</div>
                   {bet.winner===session.user.email&&isParty1&&<div style={S.wBdg}>🏆 Winner</div>}
                 </div>
                 <div style={S.vsCirc}>VS</div>
                 <div style={{...S.pBox,...(bet.winner===bet.party2_email?S.pWin:{})}}>
-                 <div style={S.pName}>{isParty2?session.user.email:bet.party2_email}</div>
+                  <div style={S.pName}>{isParty2?session.user.email:bet.party2_email}</div>
                   <div style={S.pRole}>{bet.party2_id?"Confirmed":"⏳ Pending"}</div>
                   <div style={{fontSize:11,color:bet.party2_payment_authorized?T.green:T.textDim,marginTop:4}}>{bet.party2_payment_authorized?"💳 Authorized":"💳 Pending"}</div>
                   {bet.winner===bet.party2_email&&<div style={S.wBdg}>🏆 Winner</div>}
@@ -690,13 +778,13 @@ export default function App() {
               <Pot amount={`$${par.total_stake}`} label="Parlay Pot" sub={`${sc}/${par.legs.length} legs · Auto settlement`}/>
               <div style={S.parties}>
                 <div style={{...S.pBox,...(par.overall_winner===myEmail?S.pWin:{})}}>
-                  <div style={S.pName}>{isParty1?session.user.email:bet.party2_email}</div>
+                  <div style={S.pName}>{isParty1?session.user.email:par.party2_email}</div>
                   <div style={S.pRole}>Creator</div>
                   <div style={{fontSize:11,color:par.party1_payment_authorized?T.green:T.textDim,marginTop:4}}>{par.party1_payment_authorized?"💳 Authorized":"💳 Pending"}</div>
                 </div>
                 <div style={S.vsCirc}>VS</div>
                 <div style={{...S.pBox,...(par.overall_winner===par.party2_email?S.pWin:{})}}>
-                  <div style={S.pName}>{isParty2?session.user.email:bet.party2_email}</div>
+                  <div style={S.pName}>{isParty2?session.user.email:par.party2_email}</div>
                   <div style={S.pRole}>{par.party2_id?"Confirmed":"⏳ Pending"}</div>
                   <div style={{fontSize:11,color:par.party2_payment_authorized?T.green:T.textDim,marginTop:4}}>{par.party2_payment_authorized?"💳 Authorized":"💳 Pending"}</div>
                 </div>
@@ -747,13 +835,10 @@ function LegSettler({leg,par,onSettle}){
 }
 
 function BetCard({bet,myEmail,onClick}){
- const isParty2 = myEmail?.toLowerCase()===bet.party2_email?.toLowerCase();
-const creatorDisplay = isParty2 ? bet.party2_email : myEmail;
-const opponentDisplay = isParty2 ? myEmail : bet.party2_email;
   return(
     <div style={S.betCard} className="hov" onClick={onClick}>
       <div style={S.cTop}><span style={S.idTag}>{bet.id}{bet.referee_email&&<span style={{color:"#5b2d8a",marginLeft:6}}>⚖️</span>}</span><Bdg status={bet.status}/></div>
-   {bet.party1_email||"NULL"} <span style={S.vs}>VS</span> {bet.party2_email}
+      {bet.party1_email||"NULL"} <span style={S.vs}>VS</span> {bet.party2_email}
       <div style={S.cBot}><span style={S.cat}>{bet.category}</span><span style={S.desc}>{bet.description}</span></div>
     </div>
   );
@@ -761,11 +846,10 @@ const opponentDisplay = isParty2 ? myEmail : bet.party2_email;
 
 function ParlayCard({par,myEmail,onClick}){
   const sc=par.legs.filter(l=>l.settled).length;
-
   return(
     <div style={S.betCard} className="hov" onClick={onClick}>
       <div style={S.cTop}><span style={S.idTag}>{par.id}{par.referee_email&&<span style={{color:"#5b2d8a",marginLeft:6}}>⚖️</span>} <span style={{color:"#e8751a"}}>· {par.legs.length} legs</span></span><Bdg status={par.status}/></div>
-   {par.party1_email||"Creator"} <span style={S.vs}>VS</span> {par.party2_email}
+      {par.party1_email||"Creator"} <span style={S.vs}>VS</span> {par.party2_email}
       <div style={S.cBot}><span style={S.cat}>🔗 Parlay</span><span style={S.desc}>{par.name} · {sc}/{par.legs.length} settled</span></div>
     </div>
   );
@@ -866,11 +950,23 @@ const S={
   logDot:{color:"#e8751a",fontSize:8,marginTop:4,flexShrink:0},
   logA:{fontSize:13,color:"#d4dbe3",marginBottom:2},
   logT:{fontSize:11,color:"#404d5c",fontFamily:"monospace"},
+  // Category picker
+  catGrid:{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8,marginTop:2},
+  catPill:{display:"flex",flexDirection:"column",alignItems:"center",gap:4,padding:"10px 6px",background:"#1c1f23",border:"1px solid #3a424d",borderRadius:10,cursor:"pointer",transition:"all 0.15s",outline:"none"},
+  catPillOn:{background:"#7a3c0d",border:"1px solid #e8751a"},
+  catIcon:{fontSize:22,lineHeight:1},
+  catLabel:{fontSize:10,color:"#6b7a8a",letterSpacing:0.5,textTransform:"uppercase"},
 };
 
 const css=`
   *{box-sizing:border-box;}
   .hov:hover{border-color:#e8751a!important;}
   input:focus,select:focus,textarea:focus{border-color:#e8751a!important;}
-  @media(max-width:520px){div[style*="grid-template-columns"]{grid-template-columns:1fr!important;}}
+  .catPill:hover{border-color:#e8751a!important;background:#2e343c!important;}
+  .catActive{border-color:#e8751a!important;background:#7a3c0d!important;}
+  .catActive .catLabel,.catPill:hover .catLabel{color:#e8751a!important;}
+  @media(max-width:520px){
+    div[style*="grid-template-columns: 1fr 1fr"]{grid-template-columns:1fr!important;}
+    .catGrid{grid-template-columns:repeat(4,1fr)!important;}
+  }
 `;
