@@ -10,12 +10,10 @@ module.exports = async (req, res) => {
   try {
     const { loserPaymentIntentId, winnerPaymentIntentId, amount } = req.body;
     const amountInCents = Math.round(parseFloat(amount) * 100);
-    const feeInCents = Math.round(amountInCents * 0.04);
 
-    // Capture loser's payment
+    // Capture loser's payment (no platform fee until Stripe Connect is configured)
     const captured = await stripe.paymentIntents.capture(loserPaymentIntentId, {
       amount_to_capture: amountInCents,
-      application_fee_amount: feeInCents,
     });
 
     // Release winner's hold
