@@ -761,7 +761,7 @@ const opponentDisplay = isParty2 ? myEmail : bet.party2_email;
 
 function ParlayCard({par,myEmail,onClick}){
   const sc=par.legs.filter(l=>l.settled).length;
- const isParty2 = myEmail?.toLowerCase()===bet.party2_email?.toLowerCase();
+ {par.party2_email} <span style={S.vs}>VS</span> {myEmail}
 const creatorDisplay = isParty2 ? bet.party2_email : myEmail;
 const opponentDisplay = isParty2 ? myEmail : bet.party2_email;
   return(
