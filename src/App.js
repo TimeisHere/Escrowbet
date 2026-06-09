@@ -753,7 +753,7 @@ const opponentDisplay = isParty2 ? myEmail : bet.party2_email;
   return(
     <div style={S.betCard} className="hov" onClick={onClick}>
       <div style={S.cTop}><span style={S.idTag}>{bet.id}{bet.referee_email&&<span style={{color:"#5b2d8a",marginLeft:6}}>⚖️</span>}</span><Bdg status={bet.status}/></div>
-   {bet.party1_email||"Creator"} <span style={S.vs}>VS</span> {bet.party2_email}
+   {bet.party1_email||"NULL"} <span style={S.vs}>VS</span> {bet.party2_email}
       <div style={S.cBot}><span style={S.cat}>{bet.category}</span><span style={S.desc}>{bet.description}</span></div>
     </div>
   );
