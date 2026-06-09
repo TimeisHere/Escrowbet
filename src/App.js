@@ -690,13 +690,13 @@ export default function App() {
               <Pot amount={`$${par.total_stake}`} label="Parlay Pot" sub={`${sc}/${par.legs.length} legs · Auto settlement`}/>
               <div style={S.parties}>
                 <div style={{...S.pBox,...(par.overall_winner===myEmail?S.pWin:{})}}>
-                  <div style={S.pName}>{isParty1?"You":par.party2_email}</div>
+                  <div style={S.pName}>{isParty1?session.user.email:bet.party2_email}</div>
                   <div style={S.pRole}>Creator</div>
                   <div style={{fontSize:11,color:par.party1_payment_authorized?T.green:T.textDim,marginTop:4}}>{par.party1_payment_authorized?"💳 Authorized":"💳 Pending"}</div>
                 </div>
                 <div style={S.vsCirc}>VS</div>
                 <div style={{...S.pBox,...(par.overall_winner===par.party2_email?S.pWin:{})}}>
-                  <div style={S.pName}>{isParty2?"You":par.party2_email}</div>
+                  <div style={S.pName}>{isParty2?session.user.email:bet.party2_email}</div>
                   <div style={S.pRole}>{par.party2_id?"Confirmed":"⏳ Pending"}</div>
                   <div style={{fontSize:11,color:par.party2_payment_authorized?T.green:T.textDim,marginTop:4}}>{par.party2_payment_authorized?"💳 Authorized":"💳 Pending"}</div>
                 </div>
