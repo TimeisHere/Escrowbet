@@ -35,9 +35,44 @@ const CATEGORIES = [
 const CAT_ICONS = { golf:"ti-golf",sports:"ti-trophy",gaming:"ti-device-gamepad-2",darts:"ti-target",pool:"ti-circle-dot",cards:"ti-cards",other:"ti-dots" };
 const CAT_DISPLAY = (id) => { const c=CATEGORIES.find(c=>c.id===id); return c?`${c.label}`:id; };
 
-const STATUS = { PENDING:"pending",AWAITING_P1_AUTH:"awaiting_p1_auth",AWAITING_P2_AUTH:"awaiting_p2_auth",ACTIVE:"active",AWAITING_REF:"awaiting_ref",SETTLING:"settling",SETTLED:"settled",DISPUTED:"disputed" };
-const STATUS_COLORS = { pending:"#b87a10",awaiting_p1_auth:"#1e5a8a",awaiting_p2_auth:"#1e5a8a",active:"#2e7d52",awaiting_ref:"#5b2d8a",settling:"#b87a10",settled:"#2e7d52",disputed:"#8b2525" };
-const STATUS_LABELS = { pending:"Awaiting Confirm",awaiting_p1_auth:"Card Required",awaiting_p2_auth:"Card Required",active:"Locked & Funded",awaiting_ref:"Ref Review",settling:"Processing",settled:"Settled",disputed:"Disputed" };
+const STATUS = {
+  PENDING:"pending",AWAITING_P1_AUTH:"awaiting_p1_auth",AWAITING_P2_AUTH:"awaiting_p2_auth",
+  ACTIVE:"active",AWAITING_REF:"awaiting_ref",SETTLING:"settling",SETTLED:"settled",DISPUTED:"disputed",
+  AWAITING_OUTCOME_CONFIRM:"awaiting_outcome_confirm",
+};
+const STATUS_COLORS = {
+  pending:"#b87a10",awaiting_p1_auth:"#1e5a8a",awaiting_p2_auth:"#1e5a8a",
+  active:"#2e7d52",awaiting_ref:"#5b2d8a",settling:"#b87a10",settled:"#2e7d52",disputed:"#8b2525",
+  awaiting_outcome_confirm:"#b87a10",
+};
+const STATUS_LABELS = {
+  pending:"Awaiting Confirm",awaiting_p1_auth:"Card Required",awaiting_p2_auth:"Card Required",
+  active:"Locked & Funded",awaiting_ref:"Ref Review",settling:"Processing",settled:"Settled",
+  disputed:"Disputed",awaiting_outcome_confirm:"Outcome Pending",
+};
+
+// ─── Tiers & Fees ─────────────────────────────────────────────────────────────
+const TIERS = {
+  free:  { label:"Free",   maxBet:100,    fee:0.25, monthlyFee:0  },
+  pro:   { label:"Pro",    maxBet:1000,   fee:0.23, monthlyFee:5  },
+  elite: { label:"Elite",  maxBet:Infinity,fee:0.20,monthlyFee:10 },
+};
+const MIN_BET = 5;
+const REF_REQUIRED_ABOVE = 100;
+
+// Platform fee rate: 25%/<$100, 15%/$100-$999, 10%/$1000+
+// Subscription discount applied on top per tier
+function platformFeeRate(amount, tier="free"){
+  let base = amount < 100 ? 0.25 : amount < 1000 ? 0.15 : 0.10;
+  const discount = tier==="pro" ? 0.02 : tier==="elite" ? 0.05 : 0;
+  return Math.max(0, base - discount);
+}
+function platformFee(amount, tier="free"){
+  return parseFloat((amount * platformFeeRate(amount, tier)).toFixed(2));
+}
+function disputeFee(amount){
+  return Math.max(3, parseFloat((amount * 0.25).toFixed(2)));
+}
 
 function uid(p="BET"){ return `${p}-${Math.random().toString(36).substr(2,6).toUpperCase()}`; }
 function fmt(iso){ return new Date(iso).toLocaleString(); }
@@ -259,15 +294,22 @@ export default function App(){
 
   async function createBet(){
     const f=betForm;
+    const amt=parseFloat(f.amount);
     if(!f.party2_email||!f.amount||!f.description)return toast_("Fill all required fields.","err");
     if(f.party2_email.toLowerCase()===session.user.email.toLowerCase())return toast_("Can't bet against yourself.","err");
+    if(isNaN(amt)||amt<MIN_BET)return toast_(`Minimum bet is $${MIN_BET}.`,"err");
+    if(amt>=REF_REQUIRED_ABOVE&&!f.referee_email)return toast_(`A referee is required for bets of $${REF_REQUIRED_ABOVE} or more.`,"err");
+    // Free tier bet limit
+    if(amt>TIERS.free.maxBet)return toast_(`Free accounts are limited to $${TIERS.free.maxBet} per bet. Upgrade to Pro or Elite.`,"err");
+    const fee=platformFee(amt);
     const bet={
       id:uid(),party1_id:session.user.id,
       party2_email:f.party2_email.toLowerCase(),
       referee_email:f.referee_email?f.referee_email.toLowerCase():null,
-      party1_email:session.user.email,party2_id:null,amount:parseFloat(f.amount),
+      party1_email:session.user.email,party2_id:null,amount:amt,
+      platform_fee:fee,tier:"free",
       category:CAT_DISPLAY(f.category),description:f.description,terms:f.terms,
-      status:STATUS.AWAITING_P1_AUTH,winner:null,
+      status:STATUS.AWAITING_P1_AUTH,winner:null,proposed_winner:null,
       payment_intent_id:null,payment_status:null,
       party1_payment_intent_id:null,party2_payment_intent_id:null,
       party1_payment_authorized:false,party2_payment_authorized:false,
@@ -313,14 +355,47 @@ export default function App(){
     const winnerEmail=winnerSel==="party1"?session.user.email:bet.party2_email;
     const loserEmail=winnerSel==="party1"?bet.party2_email:session.user.email;
     if(bet.referee_email){
+      // Has referee — goes to ref for confirmation
       await dbUpdate("bets",session.access_token,bet.id,{
-        status:STATUS.AWAITING_REF,winner:winnerEmail,
-        history:[...bet.history,{action:`Outcome submitted: ${winnerEmail} wins — awaiting referee`,time:now()}]
+        status:STATUS.AWAITING_REF,winner:winnerEmail,proposed_winner:winnerEmail,
+        history:[...bet.history,{action:`${session.user.email} submitted outcome: ${winnerEmail} wins — awaiting referee`,time:now()}]
       });
-      await sendNotification(bet.referee_email,`SnoVale — Referee action required`,`Outcome submitted: ${winnerEmail} wins $${bet.amount}. Log in to confirm.`,bet.id);
+      await sendNotification(bet.referee_email,`SnoVale — Referee action required`,`Outcome submitted: ${shortEmail(winnerEmail)} wins $${bet.amount}. Log in to confirm.`,bet.id);
       toast_("Submitted! Referee notified.");
-    }else{ await settleWithCapture(bet,winnerEmail,loserEmail); }
+    } else {
+      // No referee — requires opponent confirmation before payment
+      const opponent = session.user.email.toLowerCase()===bet.party1_email?.toLowerCase() ? bet.party2_email : bet.party1_email;
+      await dbUpdate("bets",session.access_token,bet.id,{
+        status:STATUS.AWAITING_OUTCOME_CONFIRM,proposed_winner:winnerEmail,
+        history:[...bet.history,{action:`${session.user.email} submitted outcome: ${winnerEmail} wins — awaiting opponent confirmation`,time:now()}]
+      });
+      await sendNotification(opponent,`SnoVale — Confirm outcome`,
+        `${session.user.email} says <strong>${winnerEmail}</strong> won $${bet.amount}.<br>Log in to confirm or dispute.`,bet.id);
+      toast_("Outcome submitted! Waiting for opponent to confirm.");
+    }
     fetchBets();setWinnerSel("");setView("list");
+  }
+
+  async function confirmOutcome(bet){
+    // Opponent agrees — settle
+    const winnerEmail=bet.proposed_winner;
+    const loserEmail=winnerEmail===bet.party2_email?bet.party1_email||session.user.email:bet.party2_email;
+    await dbUpdate("bets",session.access_token,bet.id,{
+      history:[...bet.history,{action:`${session.user.email} confirmed outcome`,time:now()}]
+    });
+    await settleWithCapture({...bet,winner:winnerEmail},winnerEmail,loserEmail);
+    fetchBets();setView("list");toast_("Outcome confirmed! Processing payment.");
+  }
+
+  async function rejectOutcome(bet){
+    // Opponent disagrees — freeze and flag
+    await dbUpdate("bets",session.access_token,bet.id,{
+      status:STATUS.DISPUTED,proposed_winner:null,
+      history:[...bet.history,{action:`${session.user.email} disputed the outcome — SnoVale review required`,time:now()}]
+    });
+    const fee=disputeFee(bet.amount);
+    fetchBets();setView("list");
+    toast_(`Outcome disputed. Holds frozen. A $${fee} dispute fee applies if escalated.`,"err");
   }
 
   async function settleWithCapture(bet,winnerEmail,loserEmail){
@@ -373,8 +448,12 @@ export default function App(){
 
   async function createParlay(){
     const f=parlayForm;
+    const amt=parseFloat(f.totalStake);
     if(!f.party2_email||!f.totalStake||legs.length<2)return toast_("Need opponent, stake, and 2+ legs.","err");
     if(legs.some(l=>!l.description))return toast_("All legs need a description.","err");
+    if(isNaN(amt)||amt<MIN_BET)return toast_(`Minimum stake is $${MIN_BET}.`,"err");
+    if(amt>=REF_REQUIRED_ABOVE&&!f.referee_email)return toast_(`A referee is required for parlays of $${REF_REQUIRED_ABOVE} or more.`,"err");
+    if(amt>TIERS.free.maxBet)return toast_(`Free accounts are limited to $${TIERS.free.maxBet} per bet. Upgrade to Pro or Elite.`,"err");
     const parlay={
       id:uid("PAR"),party1_id:session.user.id,
       party2_email:f.party2_email.toLowerCase(),
@@ -478,7 +557,7 @@ export default function App(){
   ].reduce((s,v)=>s+v,0);
   const totalWins=bets.filter(b=>b.status===STATUS.SETTLED&&b.winner===myEmail).length+parlays.filter(p=>p.status===STATUS.SETTLED&&p.overall_winner===myEmail).length;
 
-  const ACTIVE_STATUSES=[STATUS.AWAITING_P1_AUTH,STATUS.PENDING,STATUS.AWAITING_P2_AUTH,STATUS.ACTIVE,STATUS.AWAITING_REF,STATUS.SETTLING];
+  const ACTIVE_STATUSES=[STATUS.AWAITING_P1_AUTH,STATUS.PENDING,STATUS.AWAITING_P2_AUTH,STATUS.ACTIVE,STATUS.AWAITING_REF,STATUS.SETTLING,STATUS.AWAITING_OUTCOME_CONFIRM];
   const END_STATUSES=[STATUS.SETTLED,STATUS.DISPUTED];
 
   // visible = not hidden by this user
@@ -634,7 +713,7 @@ export default function App(){
               <div style={S.refInfo}>A neutral third party who confirms the outcome before payment captures.</div>
               <F label="Referee Email"><input style={S.input} type="email" placeholder="referee@email.com" value={betForm.referee_email} onChange={e=>setBetForm({...betForm,referee_email:e.target.value})}/></F>
             </div>
-            <div style={S.note}>Both parties authorize a card hold. Loser is charged automatically — winner receives the full stake.</div>
+            <FeePreview amount={betForm.amount} requiresRef={parseFloat(betForm.amount)>=REF_REQUIRED_ABOVE} hasRef={!!betForm.referee_email}/>
             <button style={S.subBtn} onClick={createBet}>Create Bet & Authorize Card →</button>
           </div>
         </div>
@@ -733,7 +812,13 @@ export default function App(){
                 <ABox color={T.green}>
                   <div style={S.aTitle}>Bet Funded — Submit Outcome</div>
                   <div style={S.aSub}>Both cards authorized. Loser charged automatically.</div>
-                  {bet.referee_email&&<div style={S.aSub}>Referee confirms before payment captures.</div>}
+                  {bet.referee_email
+                    ? <div style={S.aSub}>Referee will confirm before payment captures.</div>
+                    : <div style={S.aSub}>Opponent must confirm your outcome before payment captures.</div>
+                  }
+                  <div style={{background:T.bg,borderRadius:8,padding:"10px 12px",fontSize:12,color:T.textDim,marginBottom:4}}>
+                    Platform fee: <strong style={{color:T.orange}}>${platformFee(bet.amount)} ({(platformFeeRate(bet.amount)*100).toFixed(0)}%)</strong> deducted from loser's charge
+                  </div>
                   <select style={S.input} value={winnerSel} onChange={e=>setWinnerSel(e.target.value)}>
                     <option value="">— Select Winner —</option>
                     <option value="party1">{isParty1?"You ("+shortEmail(session.user.email)+")":shortEmail(bet.party1_email)}</option>
@@ -745,6 +830,30 @@ export default function App(){
                   </div>
                 </ABox>
               )}
+              {bet.status===STATUS.AWAITING_OUTCOME_CONFIRM&&(isParty1||isParty2)&&(()=>{
+                const proposerIsMe=bet.proposed_winner===session.user.email;
+                const proposerEmail=bet.proposed_winner===bet.party2_email?bet.party2_email:bet.party1_email||bet.party1_id;
+                return proposerIsMe?(
+                  <ABox color={T.orange}>
+                    <div style={S.aTitle}>Waiting for opponent to confirm</div>
+                    <div style={S.aSub}>You submitted: <strong style={{color:T.orange}}>{shortEmail(bet.proposed_winner)}</strong> wins</div>
+                    <div style={S.aSub}>Your opponent must confirm before payment captures.</div>
+                  </ABox>
+                ):(
+                  <ABox color={T.orange}>
+                    <div style={S.aTitle}>Confirm Outcome</div>
+                    <div style={S.aSub}><strong style={{color:T.orange}}>{shortEmail(bet.proposed_winner)}</strong> has been declared the winner of ${bet.amount}.</div>
+                    <div style={S.aSub}>Do you agree with this outcome?</div>
+                    <div style={{background:T.bg,borderRadius:8,padding:"10px 12px",fontSize:12,color:T.textDim,marginBottom:4}}>
+                      Dispute fee if rejected and escalated: <strong style={{color:T.red}}>${disputeFee(bet.amount)}</strong>
+                    </div>
+                    <div style={{display:"flex",gap:10}}>
+                      <button style={{...S.okBtn,flex:1}} onClick={()=>confirmOutcome(bet)}>Confirm — Pay Out</button>
+                      <button style={S.badBtn} onClick={()=>rejectOutcome(bet)}>Dispute</button>
+                    </div>
+                  </ABox>
+                );
+              })()}
               {bet.status===STATUS.AWAITING_REF&&isRef&&<ABox color={T.purple}><div style={S.aTitle}>Confirm & Trigger Payment</div><div style={S.aSub}><strong style={{color:T.orange}}>{bet.winner}</strong> wins ${bet.amount}</div><div style={{display:"flex",gap:10}}><button style={S.okBtn} onClick={()=>refereeConfirm(bet)}>Confirm</button><button style={S.badBtn} onClick={()=>refereeOverride(bet)}>Override</button></div></ABox>}
               {bet.status===STATUS.AWAITING_REF&&!isRef&&<ABox color={T.purple}><div style={S.aTitle}>Awaiting Referee</div><div style={S.aSub}>{bet.referee_email} has been notified.</div></ABox>}
               {bet.status===STATUS.SETTLING&&<ABox color={T.orange}><div style={S.aTitle}>Processing Payment…</div></ABox>}
@@ -847,6 +956,41 @@ export default function App(){
 }
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
+function FeePreview({amount,requiresRef,hasRef}){
+  const amt=parseFloat(amount);
+  if(!amount||isNaN(amt)||amt<MIN_BET) return(
+    <div style={{margin:"14px 0 12px",fontSize:12,color:T.textMuted,padding:"10px 12px",background:T.bg,borderRadius:8}}>
+      Minimum bet is ${MIN_BET}. Both parties authorize a hold — loser is charged automatically.
+    </div>
+  );
+  const fee=platformFee(amt);
+  const rate=(platformFeeRate(amt)*100).toFixed(0);
+  const refWarning=requiresRef&&!hasRef;
+  return(
+    <div style={{margin:"14px 0 12px",background:T.bg,borderRadius:8,padding:"12px 14px",fontSize:12}}>
+      {refWarning&&(
+        <div style={{color:T.orange,marginBottom:8,display:"flex",alignItems:"center",gap:6}}>
+          <i className="ti ti-alert-triangle" style={{fontSize:14}} aria-hidden="true"/>
+          A referee is required for bets of ${REF_REQUIRED_ABOVE} or more.
+        </div>
+      )}
+      <div style={{color:T.textDim,display:"flex",justifyContent:"space-between"}}>
+        <span>Stake</span><strong style={{color:T.text}}>${amt.toFixed(2)}</strong>
+      </div>
+      <div style={{color:T.textDim,display:"flex",justifyContent:"space-between",marginTop:4}}>
+        <span>Platform fee ({rate}%)</span><strong style={{color:T.orange}}>-${fee}</strong>
+      </div>
+      <div style={{borderTop:`1px solid ${T.border}`,marginTop:8,paddingTop:8,color:T.textDim,display:"flex",justifyContent:"space-between"}}>
+        <span>Winner receives</span><strong style={{color:T.green}}>${(amt-fee).toFixed(2)}</strong>
+      </div>
+      <div style={{color:T.textMuted,marginTop:6,fontSize:11}}>
+        {requiresRef?"Referee required · ":"No referee · opponent must confirm outcome · "}
+        Dispute fee if escalated: ${disputeFee(amt)}
+      </div>
+    </div>
+  );
+}
+
 function LegSettler({leg,par,onSettle}){
   const [w,setW]=useState("");
   return(
