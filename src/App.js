@@ -589,7 +589,7 @@ export default function App(){
                 {f:STATUS.SETTLED,  label:"Settled"},
                 {f:STATUS.DISPUTED, label:"Disputed"},
               ].map(({f,label})=>(
-                <button key={f} onClick={e=>{setFilter(f);e.currentTarget.blur();}} style={{...S.fBtn,...(filter===f?S.fBtnOn:{})}}>{label}</button>
+                <div key={f} role="button" tabIndex={0} onClick={()=>setFilter(f)} style={{...S.fBtn,...(filter===f?S.fBtnOn:{})}}>{label}</div>
               ))}
             </div>
             <div style={{display:"flex",gap:8,alignItems:"center"}}>
