@@ -880,20 +880,20 @@ function Back({onClick}){return <button style={S.back} onClick={onClick}>← Bac
 function Empty({label}){return <div style={S.empty}><div style={{fontSize:44,marginBottom:12}}>🤝</div><div style={{color:"#6b7a8a"}}>{label}</div></div>;}
 
 const S={
-  root:{minHeight:"100vh",background:"#1c1f23",color:"#d4dbe3",fontFamily:"'Trebuchet MS',sans-serif",position:"relative"},
+  root:{minHeight:"100vh",background:"#1c1f23",color:"#d4dbe3",fontFamily:"'Trebuchet MS',sans-serif",position:"relative",overflowX:"hidden",maxWidth:"100vw"},
   toast:{position:"fixed",top:16,right:16,padding:"12px 20px",borderRadius:8,color:"#fff",fontSize:13,zIndex:9999,maxWidth:320,boxShadow:"0 4px 24px rgba(0,0,0,0.5)"},
   authCard:{background:"#252a30",border:"1px solid #3a424d",borderRadius:16,padding:32,width:"100%",maxWidth:380,display:"flex",flexDirection:"column",gap:14},
   authTabs:{display:"flex",borderBottom:"1px solid #3a424d",marginBottom:4},
   authTab:{flex:1,padding:"10px",background:"none",border:"none",color:"#6b7a8a",fontSize:14,cursor:"pointer",borderBottom:"2px solid transparent"},
   authTabOn:{color:"#e8751a",borderBottom:"2px solid #e8751a"},
-  header:{background:"#252a30",borderBottom:"2px solid #e8751a",padding:"14px 22px",display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:12},
+  header:{background:"#252a30",borderBottom:"2px solid #e8751a",padding:"14px 16px",display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:12,overflow:"hidden"},
   logo:{display:"flex",alignItems:"center",gap:12},
   logoutBtn:{padding:"5px 14px",background:"none",border:"1px solid #3a424d",borderRadius:6,color:"#6b7a8a",fontSize:12,cursor:"pointer"},
   stats:{display:"flex",gap:24,flexWrap:"wrap"},
   stat:{display:"flex",flexDirection:"column",alignItems:"center"},
   statN:{fontSize:20,fontWeight:"bold",color:"#e8751a"},
   statL:{fontSize:10,color:"#6b7a8a",textTransform:"uppercase",letterSpacing:1},
-  page:{maxWidth:800,margin:"0 auto",padding:"22px 14px 60px"},
+  page:{maxWidth:800,margin:"0 auto",padding:"22px 12px 60px"},
   tabRow:{display:"flex",gap:4,marginBottom:18,borderBottom:"1px solid #3a424d"},
   tab:{padding:"10px 20px",background:"none",border:"none",color:"#6b7a8a",fontSize:14,cursor:"pointer",borderBottom:"2px solid transparent",marginBottom:-1},
   tabOn:{color:"#e8751a",borderBottom:"2px solid #e8751a"},
@@ -916,7 +916,7 @@ const S={
   cat:{fontSize:11,color:"#6b7a8a"},
   desc:{fontSize:12,color:"#6b7a8a",fontStyle:"italic",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:300},
   badge:{padding:"3px 10px",borderRadius:20,fontSize:10,fontWeight:"bold",color:"#fff",letterSpacing:0.5,whiteSpace:"nowrap"},
-  card:{background:"#252a30",border:"1px solid #3a424d",borderRadius:14,padding:"24px 22px"},
+  card:{background:"#252a30",border:"1px solid #3a424d",borderRadius:14,padding:"20px 14px"},
   cardTitle:{fontSize:20,fontWeight:"bold",color:"#e8751a",marginBottom:20},
   g2:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14},
   fLbl:{fontSize:11,color:"#6b7a8a",letterSpacing:1,textTransform:"uppercase"},
@@ -939,13 +939,13 @@ const S={
   potL:{fontSize:10,color:"#e8751a",letterSpacing:3,marginBottom:4,textTransform:"uppercase"},
   potA:{fontSize:40,fontWeight:"bold",color:"#e8751a",fontFamily:"monospace"},
   potS:{fontSize:11,color:"#6b7a8a",marginTop:4},
-  parties:{display:"flex",alignItems:"center",gap:12,marginBottom:20},
-  pBox:{flex:1,background:"#1c1f23",border:"1px solid #3a424d",borderRadius:10,padding:"14px",textAlign:"center"},
+  parties:{display:"flex",alignItems:"center",gap:8,marginBottom:20,width:"100%",minWidth:0},
+  pBox:{flex:1,minWidth:0,background:"#1c1f23",border:"1px solid #3a424d",borderRadius:10,padding:"12px 10px",textAlign:"center",overflow:"hidden"},
   pWin:{borderColor:"#e8751a",background:"#7a3c0d"},
-  pName:{fontSize:16,fontWeight:"bold",marginBottom:4},
+  pName:{fontSize:13,fontWeight:"bold",marginBottom:4,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",wordBreak:"break-all"},
   pRole:{fontSize:11,color:"#6b7a8a"},
   wBdg:{marginTop:6,fontSize:12,color:"#e8751a"},
-  vsCirc:{fontSize:12,fontWeight:"bold",color:"#e8751a",letterSpacing:2,flexShrink:0},
+  vsCirc:{fontSize:11,fontWeight:"bold",color:"#e8751a",letterSpacing:1,flexShrink:0,padding:"0 2px"},
   sec:{borderTop:"1px solid #3a424d",paddingTop:18,marginTop:18},
   secT:{fontSize:10,color:"#404d5c",letterSpacing:2,textTransform:"uppercase",marginBottom:12},
   row:{display:"flex",justifyContent:"space-between",gap:12,padding:"7px 0",borderBottom:"1px solid #2e343c",fontSize:13},
@@ -972,9 +972,11 @@ const S={
 const css=`
   @import url('https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.19.0/dist/tabler-icons.min.css');
   *{box-sizing:border-box;}
+  html,body{overflow-x:hidden;max-width:100vw;}
   .hov:hover{border-color:#e8751a!important;}
   input:focus,select:focus,textarea:focus{border-color:#e8751a!important;}
   @media(max-width:520px){
     div[style*="grid-template-columns: 1fr 1fr"]{grid-template-columns:1fr!important;}
+    .mobile-card{padding:16px 12px!important;}
   }
 `;
