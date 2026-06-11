@@ -53,25 +53,31 @@ const STATUS_LABELS = {
 
 // ─── Tiers & Fees ─────────────────────────────────────────────────────────────
 const TIERS = {
-  free:  { label:"Free",   maxBet:100,    fee:0.25, monthlyFee:0  },
-  pro:   { label:"Pro",    maxBet:1000,   fee:0.23, monthlyFee:5  },
-  elite: { label:"Elite",  maxBet:Infinity,fee:0.20,monthlyFee:10 },
+  free:  { label:"Free",   maxBet:100,      txFee:0.06,  monthlyFee:0  },
+  pro:   { label:"Pro",    maxBet:1000,     txFee:0.04,  monthlyFee:5  },
+  elite: { label:"Elite",  maxBet:Infinity, txFee:0.025, monthlyFee:10 },
 };
 const MIN_BET = 5;
 const REF_REQUIRED_ABOVE = 100;
 
-// Platform fee rate: 25%/<$100, 15%/$100-$999, 10%/$1000+
-// Subscription discount applied on top per tier
-function platformFeeRate(amount, tier="free"){
-  let base = amount < 100 ? 0.25 : amount < 1000 ? 0.15 : 0.10;
-  const discount = tier==="pro" ? 0.02 : tier==="elite" ? 0.05 : 0;
-  return Math.max(0, base - discount);
+// Transaction fee — charged to loser on top of stake. Winner receives full stake.
+function txFeeRate(tier="free"){
+  return TIERS[tier]?.txFee ?? TIERS.free.txFee;
 }
-function platformFee(amount, tier="free"){
-  return parseFloat((amount * platformFeeRate(amount, tier)).toFixed(2));
+function txFee(amount, tier="free"){
+  return parseFloat((amount * txFeeRate(tier)).toFixed(2));
+}
+function loserTotal(amount, tier="free"){
+  return parseFloat((amount + txFee(amount, tier)).toFixed(2));
+}
+
+// Dispute/review fee — only charged when SnoVale steps in as final arbiter
+// 25% under $100, 15% $100-$999, 10% $1000+, min $3
+function disputeFeeRate(amount){
+  return amount < 100 ? 0.25 : amount < 1000 ? 0.15 : 0.10;
 }
 function disputeFee(amount){
-  return Math.max(3, parseFloat((amount * 0.25).toFixed(2)));
+  return Math.max(3, parseFloat((amount * disputeFeeRate(amount)).toFixed(2)));
 }
 
 function uid(p="BET"){ return `${p}-${Math.random().toString(36).substr(2,6).toUpperCase()}`; }
@@ -301,13 +307,14 @@ export default function App(){
     if(amt>=REF_REQUIRED_ABOVE&&!f.referee_email)return toast_(`A referee is required for bets of $${REF_REQUIRED_ABOVE} or more.`,"err");
     // Free tier bet limit
     if(amt>TIERS.free.maxBet)return toast_(`Free accounts are limited to $${TIERS.free.maxBet} per bet. Upgrade to Pro or Elite.`,"err");
-    const fee=platformFee(amt);
+    const tier="free"; // TODO: read from user subscription
+    const fee=txFee(amt,tier);
     const bet={
       id:uid(),party1_id:session.user.id,
       party2_email:f.party2_email.toLowerCase(),
       referee_email:f.referee_email?f.referee_email.toLowerCase():null,
       party1_email:session.user.email,party2_id:null,amount:amt,
-      platform_fee:fee,tier:"free",
+      platform_fee:fee,tier,
       category:CAT_DISPLAY(f.category),description:f.description,terms:f.terms,
       status:STATUS.AWAITING_P1_AUTH,winner:null,proposed_winner:null,
       payment_intent_id:null,payment_status:null,
@@ -817,7 +824,7 @@ export default function App(){
                     : <div style={S.aSub}>Opponent must confirm your outcome before payment captures.</div>
                   }
                   <div style={{background:T.bg,borderRadius:8,padding:"10px 12px",fontSize:12,color:T.textDim,marginBottom:4}}>
-                    Platform fee: <strong style={{color:T.orange}}>${platformFee(bet.amount)} ({(platformFeeRate(bet.amount)*100).toFixed(0)}%)</strong> deducted from loser's charge
+                    Winner receives: <strong style={{color:T.green}}>${bet.amount}</strong> · If you lose, you pay: <strong style={{color:T.red}}>${loserTotal(bet.amount, bet.tier||"free")}</strong> (includes {(txFeeRate(bet.tier||"free")*100).toFixed(1)}% SnoVale fee)
                   </div>
                   <select style={S.input} value={winnerSel} onChange={e=>setWinnerSel(e.target.value)}>
                     <option value="">— Select Winner —</option>
@@ -845,7 +852,7 @@ export default function App(){
                     <div style={S.aSub}><strong style={{color:T.orange}}>{shortEmail(bet.proposed_winner)}</strong> has been declared the winner of ${bet.amount}.</div>
                     <div style={S.aSub}>Do you agree with this outcome?</div>
                     <div style={{background:T.bg,borderRadius:8,padding:"10px 12px",fontSize:12,color:T.textDim,marginBottom:4}}>
-                      Dispute fee if rejected and escalated: <strong style={{color:T.red}}>${disputeFee(bet.amount)}</strong>
+                      SnoVale review fee if escalated: <strong style={{color:T.red}}>${disputeFee(bet.amount)}</strong> ({(disputeFeeRate(bet.amount)*100).toFixed(0)}% of pot — only charged if SnoVale must determine winner)
                     </div>
                     <div style={{display:"flex",gap:10}}>
                       <button style={{...S.okBtn,flex:1}} onClick={()=>confirmOutcome(bet)}>Confirm — Pay Out</button>
@@ -956,36 +963,40 @@ export default function App(){
 }
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
-function FeePreview({amount,requiresRef,hasRef}){
+function FeePreview({amount,requiresRef,hasRef,tier="free"}){
   const amt=parseFloat(amount);
   if(!amount||isNaN(amt)||amt<MIN_BET) return(
     <div style={{margin:"14px 0 12px",fontSize:12,color:T.textMuted,padding:"10px 12px",background:T.bg,borderRadius:8}}>
-      Minimum bet is ${MIN_BET}. Both parties authorize a hold — loser is charged automatically.
+      Minimum bet is ${MIN_BET}. Both parties authorize a hold — loser is charged, winner receives the full stake.
     </div>
   );
-  const fee=platformFee(amt);
-  const rate=(platformFeeRate(amt)*100).toFixed(0);
+  const fee=txFee(amt,tier);
+  const rate=(txFeeRate(tier)*100).toFixed(1);
+  const total=loserTotal(amt,tier);
   const refWarning=requiresRef&&!hasRef;
   return(
     <div style={{margin:"14px 0 12px",background:T.bg,borderRadius:8,padding:"12px 14px",fontSize:12}}>
       {refWarning&&(
-        <div style={{color:T.orange,marginBottom:8,display:"flex",alignItems:"center",gap:6}}>
+        <div style={{color:T.orange,marginBottom:10,display:"flex",alignItems:"center",gap:6,fontSize:12}}>
           <i className="ti ti-alert-triangle" style={{fontSize:14}} aria-hidden="true"/>
           A referee is required for bets of ${REF_REQUIRED_ABOVE} or more.
         </div>
       )}
-      <div style={{color:T.textDim,display:"flex",justifyContent:"space-between"}}>
+      <div style={{color:T.textDim,display:"flex",justifyContent:"space-between",marginBottom:4}}>
         <span>Stake</span><strong style={{color:T.text}}>${amt.toFixed(2)}</strong>
       </div>
-      <div style={{color:T.textDim,display:"flex",justifyContent:"space-between",marginTop:4}}>
-        <span>Platform fee ({rate}%)</span><strong style={{color:T.orange}}>-${fee}</strong>
+      <div style={{color:T.textDim,display:"flex",justifyContent:"space-between",marginBottom:4}}>
+        <span>Winner receives</span><strong style={{color:T.green}}>${amt.toFixed(2)}</strong>
+      </div>
+      <div style={{color:T.textDim,display:"flex",justifyContent:"space-between",marginBottom:4}}>
+        <span>SnoVale fee ({rate}%)</span><strong style={{color:T.orange}}>${fee}</strong>
       </div>
       <div style={{borderTop:`1px solid ${T.border}`,marginTop:8,paddingTop:8,color:T.textDim,display:"flex",justifyContent:"space-between"}}>
-        <span>Winner receives</span><strong style={{color:T.green}}>${(amt-fee).toFixed(2)}</strong>
+        <span>If you lose, you pay</span><strong style={{color:T.red}}>${total}</strong>
       </div>
-      <div style={{color:T.textMuted,marginTop:6,fontSize:11}}>
-        {requiresRef?"Referee required · ":"No referee · opponent must confirm outcome · "}
-        Dispute fee if escalated: ${disputeFee(amt)}
+      <div style={{color:T.textMuted,marginTop:8,fontSize:11,lineHeight:1.5}}>
+        {requiresRef?"Referee required · ":"No referee · opponent confirms outcome · "}
+        SnoVale review fee if escalated: ${disputeFee(amt)} ({(disputeFeeRate(amt)*100).toFixed(0)}% of pot)
       </div>
     </div>
   );
