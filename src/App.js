@@ -185,7 +185,23 @@ export default function App(){
     return()=>{if(refreshTimerRef.current)clearTimeout(refreshTimerRef.current);};
   },[scheduleRefresh]);
 
-  useEffect(()=>{if(session){fetchBets();fetchParlays();}}, [session]);
+  const [refreshing,setRefreshing]=useState(false);
+  const pollRef=useRef(null);
+
+  async function refreshAll(manual=false){
+    if(!session)return;
+    if(manual)setRefreshing(true);
+    await Promise.all([fetchBets(),fetchParlays()]);
+    if(manual)setTimeout(()=>setRefreshing(false),600);
+  }
+
+  useEffect(()=>{
+    if(session){
+      fetchBets();fetchParlays();
+      pollRef.current=setInterval(()=>{fetchBets();fetchParlays();},15000);
+    }
+    return()=>{if(pollRef.current)clearInterval(pollRef.current);};
+  },[session]);
 
   function toast_(msg,type="ok"){setToast({msg,type});setTimeout(()=>setToast(null),3200);}
 
@@ -455,17 +471,31 @@ export default function App(){
   }
 
   const myEmail=session?.user?.email?.toLowerCase();
+  const uid_=session?.user?.id;
   const activeStake=[
     ...bets.filter(b=>[STATUS.ACTIVE,STATUS.AWAITING_REF,STATUS.SETTLING].includes(b.status)).map(b=>b.amount),
     ...parlays.filter(p=>[STATUS.ACTIVE,STATUS.AWAITING_REF,STATUS.SETTLING].includes(p.status)).map(p=>p.total_stake)
   ].reduce((s,v)=>s+v,0);
   const totalWins=bets.filter(b=>b.status===STATUS.SETTLED&&b.winner===myEmail).length+parlays.filter(p=>p.status===STATUS.SETTLED&&p.overall_winner===myEmail).length;
+
+  const ACTIVE_STATUSES=[STATUS.AWAITING_P1_AUTH,STATUS.PENDING,STATUS.AWAITING_P2_AUTH,STATUS.ACTIVE,STATUS.AWAITING_REF,STATUS.SETTLING];
+  const END_STATUSES=[STATUS.SETTLED,STATUS.DISPUTED];
+
+  // visible = not hidden by this user
+  const visibleBets=bets.filter(b=>!b.hidden_by?.includes(uid_));
+  const visibleParlays=parlays.filter(p=>!p.hidden_by?.includes(uid_));
+
+  // "All" shows only open/active bets — settled+disputed live in their own filter
   const filteredBets=filter==="all"
-    ?bets.filter(b=>!b.hidden_by?.includes(session.user.id))
-    :bets.filter(b=>b.status===filter&&!b.hidden_by?.includes(session.user.id));
+    ?visibleBets.filter(b=>ACTIVE_STATUSES.includes(b.status))
+    :visibleBets.filter(b=>b.status===filter);
   const filteredParlays=filter==="all"
-    ?parlays.filter(p=>!p.hidden_by?.includes(session.user.id))
-    :parlays.filter(p=>p.status===filter&&!p.hidden_by?.includes(session.user.id));
+    ?visibleParlays.filter(p=>ACTIVE_STATUSES.includes(p.status))
+    :visibleParlays.filter(p=>p.status===filter);
+
+  // counts for tab badges — only visible, only open
+  const openBetCount=visibleBets.filter(b=>ACTIVE_STATUSES.includes(b.status)).length;
+  const openParlayCount=visibleParlays.filter(p=>ACTIVE_STATUSES.includes(p.status)).length;
 
   // ── Auth Screen ─────────────────────────────────────────────────────────────
   if(!session) return(
@@ -543,28 +573,40 @@ export default function App(){
         <div style={S.page}>
           <div style={S.tabRow}>
             <button style={{...S.tab,...(tab==="bets"?S.tabOn:{})}} onClick={()=>setTab("bets")}>
-              Bets <span style={S.tabCt}>{bets.length}</span>
+              Bets <span style={S.tabCt}>{openBetCount}</span>
             </button>
             <button style={{...S.tab,...(tab==="parlays"?S.tabOn:{})}} onClick={()=>setTab("parlays")}>
-              Parlays <span style={S.tabCt}>{parlays.length}</span>
+              Parlays <span style={S.tabCt}>{openParlayCount}</span>
             </button>
           </div>
           <div style={S.toolbar}>
             <div style={S.filters}>
-              {["all",STATUS.AWAITING_P1_AUTH,STATUS.PENDING,STATUS.ACTIVE,STATUS.AWAITING_REF,STATUS.SETTLED,STATUS.DISPUTED].map(f=>(
-                <button key={f} onClick={()=>setFilter(f)} style={{...S.fBtn,...(filter===f?S.fBtnOn:{})}}>{f==="all"?"All":STATUS_LABELS[f]}</button>
+              {[
+                {f:"all",           label:"Open"},
+                {f:STATUS.ACTIVE,   label:"Funded"},
+                {f:STATUS.PENDING,  label:"Pending"},
+                {f:STATUS.AWAITING_REF, label:"Ref Review"},
+                {f:STATUS.SETTLED,  label:"Settled"},
+                {f:STATUS.DISPUTED, label:"Disputed"},
+              ].map(({f,label})=>(
+                <button key={f} onClick={()=>setFilter(f)} style={{...S.fBtn,...(filter===f?S.fBtnOn:{})}}>{label}</button>
               ))}
             </div>
-            <button style={S.newBtn} onClick={()=>setView(tab==="bets"?"createBet":"createParlay")}>
-              <i className="ti ti-plus" aria-hidden="true"/> New {tab==="bets"?"Bet":"Parlay"}
-            </button>
+            <div style={{display:"flex",gap:8,alignItems:"center"}}>
+              <button style={S.refreshBtn} onClick={()=>refreshAll(true)} title="Refresh">
+                <i className={`ti ti-refresh${refreshing?" spin":""}`} style={{fontSize:15}} aria-hidden="true"/>
+              </button>
+              <button style={S.newBtn} onClick={()=>setView(tab==="bets"?"createBet":"createParlay")}>
+                <i className="ti ti-plus" aria-hidden="true"/> New {tab==="bets"?"Bet":"Parlay"}
+              </button>
+            </div>
           </div>
           {tab==="bets"&&(filteredBets.length===0
-            ?<Empty label="No bets yet." cta="Tap + New Bet to challenge someone."/>
+            ?<Empty label={filter==="all"?"No open bets.":filter===STATUS.SETTLED?"No settled bets.":filter===STATUS.DISPUTED?"No disputed bets.":"No bets here."} cta={filter==="all"?"Tap + New Bet to challenge someone.":undefined}/>
             :<div style={S.list}>{filteredBets.map(b=><BetCard key={b.id} bet={b} myEmail={myEmail} onClick={()=>{setSelected(b);setView("detailBet");}}/>)}</div>
           )}
           {tab==="parlays"&&(filteredParlays.length===0
-            ?<Empty label="No parlays yet." cta="Tap + New Parlay to set up a multi-leg bet."/>
+            ?<Empty label={filter==="all"?"No open parlays.":filter===STATUS.SETTLED?"No settled parlays.":filter===STATUS.DISPUTED?"No disputed parlays.":"No parlays here."} cta={filter==="all"?"Tap + New Parlay to set up a multi-leg bet.":undefined}/>
             :<div style={S.list}>{filteredParlays.map(p=><ParlayCard key={p.id} par={p} myEmail={myEmail} onClick={()=>{setSelected(p);setView("detailParlay");}}/>)}</div>
           )}
         </div>
@@ -1004,6 +1046,7 @@ const S={
   pillRow:{display:"flex",flexWrap:"wrap",gap:8,marginTop:4},
   catPill:{display:"inline-flex",alignItems:"center",gap:7,padding:"7px 13px",background:"#1c1f23",border:"1px solid #3a424d",borderRadius:6,cursor:"pointer",outline:"none",fontFamily:"inherit",fontSize:12,letterSpacing:"0.3px",transition:"border-color 0.12s,background 0.12s",whiteSpace:"nowrap"},
   catPillOn:{borderColor:"#e8751a",background:"#1e1208"},
+  refreshBtn:{padding:"8px 10px",background:"none",border:"1px solid #3a424d",borderRadius:8,color:"#6b7a8a",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"},
   removeBtn:{background:"none",border:"1px solid #3a424d",borderRadius:8,padding:"9px 16px",color:"#6b7a8a",fontSize:12,cursor:"pointer",display:"flex",alignItems:"center",gap:8,fontFamily:"inherit"},
 };
 
@@ -1015,6 +1058,8 @@ const css=`
   body{font-family:'Inter','Trebuchet MS',sans-serif;}
   .hov:hover{border-color:#e8751a!important;}
   input:focus,select:focus,textarea:focus{border-color:#e8751a!important;}
+  @keyframes spin{to{transform:rotate(360deg);}}
+  .spin{animation:spin 0.6s linear infinite;}
   @media(max-width:520px){
     div[style*="grid-template-columns: 1fr 1fr"]{grid-template-columns:1fr!important;}
   }
