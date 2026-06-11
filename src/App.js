@@ -572,10 +572,10 @@ export default function App(){
       {view==="list"&&(
         <div style={S.page}>
           <div style={S.tabRow}>
-            <button style={{...S.tab,...(tab==="bets"?S.tabOn:{})}} onClick={()=>setTab("bets")}>
+            <button style={{...S.tab,...(tab==="bets"?S.tabOn:{})}} onClick={()=>{setTab("bets");setFilter("all");}}>
               Bets <span style={S.tabCt}>{openBetCount}</span>
             </button>
-            <button style={{...S.tab,...(tab==="parlays"?S.tabOn:{})}} onClick={()=>setTab("parlays")}>
+            <button style={{...S.tab,...(tab==="parlays"?S.tabOn:{})}} onClick={()=>{setTab("parlays");setFilter("all");}}>
               Parlays <span style={S.tabCt}>{openParlayCount}</span>
             </button>
           </div>
