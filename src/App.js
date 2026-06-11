@@ -149,8 +149,11 @@ function CardAuthForm({bet,session,role,onSuccess,onCancel}){
     if(!cardElementRef.current||!stripeRef.current)return;
     setProcessing(true);setError("");
     try{
-      const amount=bet.amount||bet.total_stake;
-      const r=await fetch("/api/authorize-card",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({amount,betId:bet.id,email:session.user.email,role,description:bet.description||bet.name})});
+      const stake=bet.amount||bet.total_stake;
+      const tier=bet.tier||"free";
+      // Authorize loserTotal so Stripe allows capture of stake + fee
+      const authorizeAmount=loserTotal(stake,tier);
+      const r=await fetch("/api/authorize-card",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({amount:authorizeAmount,stake,betId:bet.id,email:session.user.email,role,description:bet.description||bet.name,tier})});
       const {clientSecret,paymentIntentId,error:apiError}=await r.json();
       if(apiError){setError(apiError);setProcessing(false);return;}
       const {error:stripeError,paymentIntent}=await stripeRef.current.confirmCardPayment(clientSecret,{payment_method:{card:cardElementRef.current,billing_details:{email:session.user.email}}});
@@ -160,17 +163,20 @@ function CardAuthForm({bet,session,role,onSuccess,onCancel}){
     }catch(e){setError(e.message);setProcessing(false);}
   }
 
-  const amount=bet.amount||bet.total_stake;
+  const stake=bet.amount||bet.total_stake;
+  const tier=bet.tier||"free";
+  const authAmount=loserTotal(stake,tier);
   return(
     <div style={S.paymentForm}>
       <div style={S.aTitle}>Authorize Card to Lock Bet</div>
-      <div style={S.aSub}>A hold of <strong style={{color:T.orange}}>${amount}</strong> will appear on your card.</div>
+      <div style={S.aSub}>A hold of <strong style={{color:T.orange}}>${authAmount}</strong> will appear on your card.</div>
+      <div style={S.aSub}><span style={{color:T.textDim}}>Stake: ${stake} · SnoVale service fee: ${txFee(stake,tier)} ({(txFeeRate(tier)*100).toFixed(1)}%)</span></div>
       <div style={{...S.aSub,color:T.green}}>You are only charged if you LOSE.</div>
       <div style={S.cardBox}><div ref={cardRef} style={{minHeight:24,padding:4}}/></div>
       {error&&<div style={{color:T.red,fontSize:13,padding:"8px 0"}}>{error}</div>}
       <div style={{display:"flex",gap:10}}>
         <button style={{...S.okBtn,opacity:(!cardReady||processing)?0.6:1,flex:1}} onClick={handleAuthorize} disabled={!cardReady||processing}>
-          {processing?"Authorizing…":`Authorize $${amount} Hold`}
+          {processing?"Authorizing…":`Authorize $${authAmount} Hold`}
         </button>
         <button style={S.ghostBtn} onClick={onCancel} disabled={processing}>Cancel</button>
       </div>
@@ -824,7 +830,15 @@ export default function App(){
                     : <div style={S.aSub}>Opponent must confirm your outcome before payment captures.</div>
                   }
                   <div style={{background:T.bg,borderRadius:8,padding:"10px 12px",fontSize:12,color:T.textDim,marginBottom:4}}>
-                    Winner receives: <strong style={{color:T.green}}>${bet.amount}</strong> · If you lose, you pay: <strong style={{color:T.red}}>${loserTotal(bet.amount, bet.tier||"free")}</strong> (includes {(txFeeRate(bet.tier||"free")*100).toFixed(1)}% SnoVale fee)
+                    <div style={{display:"flex",justifyContent:"space-between",marginBottom:3}}>
+                      <span>Winner receives</span><strong style={{color:T.green}}>${bet.amount}</strong>
+                    </div>
+                    <div style={{display:"flex",justifyContent:"space-between",marginBottom:3}}>
+                      <span>SnoVale service fee ({(txFeeRate(bet.tier||"free")*100).toFixed(1)}%)</span><strong style={{color:T.orange}}>${txFee(bet.amount,bet.tier||"free")}</strong>
+                    </div>
+                    <div style={{display:"flex",justifyContent:"space-between",borderTop:`1px solid ${T.border}`,paddingTop:6,marginTop:3}}>
+                      <span>If you lose, you pay</span><strong style={{color:T.red}}>${loserTotal(bet.amount,bet.tier||"free")}</strong>
+                    </div>
                   </div>
                   <select style={S.input} value={winnerSel} onChange={e=>setWinnerSel(e.target.value)}>
                     <option value="">— Select Winner —</option>
@@ -852,7 +866,8 @@ export default function App(){
                     <div style={S.aSub}><strong style={{color:T.orange}}>{shortEmail(bet.proposed_winner)}</strong> has been declared the winner of ${bet.amount}.</div>
                     <div style={S.aSub}>Do you agree with this outcome?</div>
                     <div style={{background:T.bg,borderRadius:8,padding:"10px 12px",fontSize:12,color:T.textDim,marginBottom:4}}>
-                      SnoVale review fee if escalated: <strong style={{color:T.red}}>${disputeFee(bet.amount)}</strong> ({(disputeFeeRate(bet.amount)*100).toFixed(0)}% of pot — only charged if SnoVale must determine winner)
+                      <strong style={{color:T.textDim,display:"block",marginBottom:3}}>Review fee (only if SnoVale must determine winner)</strong>
+                      {(disputeFeeRate(bet.amount)*100).toFixed(0)}% of pot · <strong style={{color:T.red}}>${disputeFee(bet.amount)}</strong> on this bet · Refunded if you win the review
                     </div>
                     <div style={{display:"flex",gap:10}}>
                       <button style={{...S.okBtn,flex:1}} onClick={()=>confirmOutcome(bet)}>Confirm — Pay Out</button>
@@ -989,14 +1004,17 @@ function FeePreview({amount,requiresRef,hasRef,tier="free"}){
         <span>Winner receives</span><strong style={{color:T.green}}>${amt.toFixed(2)}</strong>
       </div>
       <div style={{color:T.textDim,display:"flex",justifyContent:"space-between",marginBottom:4}}>
-        <span>SnoVale fee ({rate}%)</span><strong style={{color:T.orange}}>${fee}</strong>
+        <span>SnoVale service fee ({rate}%)</span><strong style={{color:T.orange}}>${fee}</strong>
       </div>
-      <div style={{borderTop:`1px solid ${T.border}`,marginTop:8,paddingTop:8,color:T.textDim,display:"flex",justifyContent:"space-between"}}>
+      <div style={{borderTop:`1px solid ${T.border}`,marginTop:8,paddingTop:8,color:T.textDim,display:"flex",justifyContent:"space-between",marginBottom:10}}>
         <span>If you lose, you pay</span><strong style={{color:T.red}}>${total}</strong>
       </div>
-      <div style={{color:T.textMuted,marginTop:8,fontSize:11,lineHeight:1.5}}>
-        {requiresRef?"Referee required · ":"No referee · opponent confirms outcome · "}
-        SnoVale review fee if escalated: ${disputeFee(amt)} ({(disputeFeeRate(amt)*100).toFixed(0)}% of pot)
+      <div style={{borderTop:`1px solid ${T.border}`,paddingTop:10}}>
+        <div style={{color:T.textMuted,fontSize:11,marginBottom:4,fontWeight:"600",letterSpacing:"0.5px",textTransform:"uppercase"}}>Review fee (only if SnoVale must determine winner)</div>
+        <div style={{color:T.textMuted,fontSize:11,lineHeight:1.6}}>
+          Charged to the disputing party only · {(disputeFeeRate(amt)*100).toFixed(0)}% of pot · <strong style={{color:T.textDim}}>${disputeFee(amt)} on this bet</strong><br/>
+          Refunded if you win the review · Avoidable with a trusted referee
+        </div>
       </div>
     </div>
   );
