@@ -198,6 +198,21 @@ export default function App(){
     if(Array.isArray(data))setParlays(data);
   }
 
+  const REMOVABLE=[STATUS.SETTLED,STATUS.DISPUTED];
+
+  async function hideBet(bet){
+    const current=Array.isArray(bet.hidden_by)?bet.hidden_by:[];
+    if(current.includes(session.user.id))return;
+    await dbUpdate("bets",session.access_token,bet.id,{hidden_by:[...current,session.user.id]});
+    fetchBets();setView("list");toast_("Bet removed from your list.");
+  }
+  async function hideParlay(par){
+    const current=Array.isArray(par.hidden_by)?par.hidden_by:[];
+    if(current.includes(session.user.id))return;
+    await dbUpdate("parlays",session.access_token,par.id,{hidden_by:[...current,session.user.id]});
+    fetchParlays();setView("list");toast_("Parlay removed from your list.");
+  }
+
   async function handleAuth(){
     setAuthLoading(true);setAuthError("");
     if(authView==="login"){
@@ -445,8 +460,12 @@ export default function App(){
     ...parlays.filter(p=>[STATUS.ACTIVE,STATUS.AWAITING_REF,STATUS.SETTLING].includes(p.status)).map(p=>p.total_stake)
   ].reduce((s,v)=>s+v,0);
   const totalWins=bets.filter(b=>b.status===STATUS.SETTLED&&b.winner===myEmail).length+parlays.filter(p=>p.status===STATUS.SETTLED&&p.overall_winner===myEmail).length;
-  const filteredBets=filter==="all"?bets:bets.filter(b=>b.status===filter);
-  const filteredParlays=filter==="all"?parlays:parlays.filter(p=>p.status===filter);
+  const filteredBets=filter==="all"
+    ?bets.filter(b=>!b.hidden_by?.includes(session.user.id))
+    :bets.filter(b=>b.status===filter&&!b.hidden_by?.includes(session.user.id));
+  const filteredParlays=filter==="all"
+    ?parlays.filter(p=>!p.hidden_by?.includes(session.user.id))
+    :parlays.filter(p=>p.status===filter&&!p.hidden_by?.includes(session.user.id));
 
   // ── Auth Screen ─────────────────────────────────────────────────────────────
   if(!session) return(
@@ -690,6 +709,19 @@ export default function App(){
               {bet.status===STATUS.SETTLED&&<ABox color={T.green}><div style={S.aTitle}>Settled</div><div style={S.aSub}>{bet.winner} wins ${bet.amount}! Auto-processed.</div></ABox>}
               {bet.status===STATUS.DISPUTED&&<ABox color={T.red}><div style={S.aTitle}>Disputed — Holds Released</div><div style={S.aSub}>Resolve manually.</div></ABox>}
               <CollapsibleLog history={bet.history} open={logOpen} onToggle={()=>setLogOpen(v=>!v)}/>
+              {REMOVABLE.includes(bet.status)&&(isParty1||isParty2)&&(
+                <div style={{marginTop:16,borderTop:`1px solid ${T.border}`,paddingTop:16}}>
+                  <button style={S.removeBtn} onClick={()=>setConfirm({
+                    title:"Remove from your list?",
+                    body:"This hides the bet from your view only. The other party's view is unaffected. This cannot be undone.",
+                    confirmLabel:"Remove",
+                    confirmColor:T.textMuted,
+                    onConfirm:()=>{setConfirm(null);hideBet(bet);}
+                  })}>
+                    <i className="ti ti-trash" style={{fontSize:14}} aria-hidden="true"/> Remove from my list
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         );
@@ -751,6 +783,19 @@ export default function App(){
               {par.status===STATUS.SETTLED&&<ABox color={T.green}><div style={S.aTitle}>Parlay Settled</div><div style={S.aSub}>{par.overall_winner?.includes("SPLIT")?"Split — holds released.":`${par.overall_winner} wins $${par.total_stake}!`}</div></ABox>}
               {par.status===STATUS.DISPUTED&&<ABox color={T.red}><div style={S.aTitle}>Disputed — Holds Released</div></ABox>}
               <CollapsibleLog history={par.history} open={logOpen} onToggle={()=>setLogOpen(v=>!v)}/>
+              {REMOVABLE.includes(par.status)&&(isParty1||isParty2)&&(
+                <div style={{marginTop:16,borderTop:`1px solid ${T.border}`,paddingTop:16}}>
+                  <button style={S.removeBtn} onClick={()=>setConfirm({
+                    title:"Remove from your list?",
+                    body:"This hides the parlay from your view only. The other party's view is unaffected. This cannot be undone.",
+                    confirmLabel:"Remove",
+                    confirmColor:T.textMuted,
+                    onConfirm:()=>{setConfirm(null);hideParlay(par);}
+                  })}>
+                    <i className="ti ti-trash" style={{fontSize:14}} aria-hidden="true"/> Remove from my list
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         );
@@ -959,6 +1004,7 @@ const S={
   pillRow:{display:"flex",flexWrap:"wrap",gap:8,marginTop:4},
   catPill:{display:"inline-flex",alignItems:"center",gap:7,padding:"7px 13px",background:"#1c1f23",border:"1px solid #3a424d",borderRadius:6,cursor:"pointer",outline:"none",fontFamily:"inherit",fontSize:12,letterSpacing:"0.3px",transition:"border-color 0.12s,background 0.12s",whiteSpace:"nowrap"},
   catPillOn:{borderColor:"#e8751a",background:"#1e1208"},
+  removeBtn:{background:"none",border:"1px solid #3a424d",borderRadius:8,padding:"9px 16px",color:"#6b7a8a",fontSize:12,cursor:"pointer",display:"flex",alignItems:"center",gap:8,fontFamily:"inherit"},
 };
 
 const css=`
