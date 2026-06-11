@@ -1056,6 +1056,7 @@ const css=`
   *{box-sizing:border-box;}
   html,body{overflow-x:hidden;max-width:100vw;}
   body{font-family:'Inter','Trebuchet MS',sans-serif;}
+  button{outline:none!important;-webkit-tap-highlight-color:transparent;}
   .hov:hover{border-color:#e8751a!important;}
   input:focus,select:focus,textarea:focus{border-color:#e8751a!important;}
   @keyframes spin{to{transform:rotate(360deg);}}
